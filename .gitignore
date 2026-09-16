@@ -1,0 +1,15 @@
+.gradle/
+build/
+target/
+out/
+*.class
+
+.idea/
+*.iml
+
+.env
+.env.*
+!*.example
+
+logs/
+*.log

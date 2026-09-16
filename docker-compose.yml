@@ -1,0 +1,20 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: audigo-mysql
+    environment:
+      MYSQL_DATABASE: audigo
+      MYSQL_USER: audigo
+      MYSQL_PASSWORD: audigo
+      MYSQL_ROOT_PASSWORD: root
+      TZ: Asia/Seoul
+    ports:
+      - "3306:3306"
+    volumes:
+      - audigo-mysql-data:/var/lib/mysql
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+
+volumes:
+  audigo-mysql-data:
