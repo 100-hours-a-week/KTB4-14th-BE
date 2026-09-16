@@ -31,7 +31,11 @@ public class UserService {
     }
 
     private User findUser(Long userId) {
-        return userRepository.findById(userId)
+        User user = userRepository.findById(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
+        if (!user.isActive()) {
+            throw new BusinessException(ErrorCode.USER_INACTIVE);
+        }
+        return user;
     }
 }

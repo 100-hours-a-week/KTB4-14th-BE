@@ -74,6 +74,14 @@ public class User {
         return profileImageUrl;
     }
 
+    public String status() {
+        return status;
+    }
+
+    public boolean isActive() {
+        return "ACTIVE".equals(status) && deletedAt == null;
+    }
+
     public void updateNickname(String nickname) {
         this.nickname = nickname;
     }

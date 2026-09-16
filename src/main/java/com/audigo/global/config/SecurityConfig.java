@@ -1,6 +1,7 @@
 package com.audigo.global.config;
 
 import com.audigo.global.security.BearerTokenAuthenticationFilter;
+import com.audigo.global.logging.RequestLoggingFilter;
 import java.util.List;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -33,6 +34,7 @@ public class SecurityConfig {
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(bearerTokenAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterAfter(new RequestLoggingFilter(), BearerTokenAuthenticationFilter.class)
                 .build();
     }
 
@@ -42,7 +44,8 @@ public class SecurityConfig {
         configuration.setAllowedOrigins(corsProperties.resolvedAllowedOrigins());
         configuration.setAllowedMethods(List.of("GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("Authorization", "Content-Type"));
-        configuration.setExposedHeaders(List.of("Authorization"));
+        configuration.setExposedHeaders(List.of("Authorization", RequestLoggingFilter.REQUEST_ID_HEADER));
+        configuration.setAllowCredentials(true);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);

@@ -1,6 +1,6 @@
 package com.audigo.domain.auth.service;
 
-import com.audigo.domain.auth.dto.TokenResponse;
+import com.audigo.domain.auth.dto.AuthTokens;
 import com.audigo.domain.auth.entity.RefreshToken;
 import com.audigo.domain.auth.token.JwtTokenProvider;
 import com.audigo.domain.auth.repository.RefreshTokenRepository;
@@ -41,28 +41,27 @@ public class TokenService {
     }
 
     @Transactional
-    public TokenResponse issue(Long userId) {
+    public AuthTokens issue(Long userId) {
         String accessToken = jwtTokenProvider.createAccessToken(userId, accessTokenTtlSeconds);
         String refreshToken = "AUDIGO_REFRESH_" + UUID.randomUUID();
         Instant now = Instant.now();
 
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
+        User user = findActiveUser(userId);
         refreshTokenRepository.save(RefreshToken.create(
                 user,
                 TokenHash.sha256(refreshToken),
                 LocalDateTime.ofInstant(now.plusSeconds(refreshTokenTtlSeconds), ZoneId.systemDefault())
         ));
 
-        return new TokenResponse(accessToken, refreshToken, "Bearer", accessTokenTtlSeconds, refreshTokenTtlSeconds);
+        return new AuthTokens(accessToken, refreshToken, "Bearer", accessTokenTtlSeconds, refreshTokenTtlSeconds);
     }
 
     @Transactional
-    public TokenResponse refresh(String refreshToken) {
+    public AuthTokens refresh(String refreshToken) {
         RefreshToken storedToken = refreshTokenRepository.findByTokenHash(TokenHash.sha256(refreshToken))
-                .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED));
+                .orElseThrow(() -> new BusinessException(ErrorCode.REFRESH_TOKEN_NOT_FOUND));
         if (!storedToken.isUsable()) {
-            throw new BusinessException(ErrorCode.UNAUTHORIZED);
+            throw new BusinessException(ErrorCode.INVALID_REFRESH_TOKEN);
         }
         storedToken.revoke();
         return issue(storedToken.user().id());
@@ -76,5 +75,14 @@ public class TokenService {
 
     public Optional<Long> findUserIdByAccessToken(String accessToken) {
         return jwtTokenProvider.parseAccessToken(accessToken);
+    }
+
+    private User findActiveUser(Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
+        if (!user.isActive()) {
+            throw new BusinessException(ErrorCode.USER_INACTIVE);
+        }
+        return user;
     }
 }
