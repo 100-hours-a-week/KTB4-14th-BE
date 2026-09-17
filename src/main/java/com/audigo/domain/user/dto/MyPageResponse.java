@@ -3,13 +3,15 @@ package com.audigo.domain.user.dto;
 import com.audigo.domain.user.entity.User;
 
 public record MyPageResponse(
+        Long userId,
         String nickname,
-        String profileImage,
+        String profileImageUrl,
         String provider,
+        String status,
         long completedTravelCount,
         long upcomingTravelCount
 ) {
     public static MyPageResponse from(User user) {
-        return new MyPageResponse(user.nickname(), user.profileImageUrl(), "KAKAO", 0, 0);
+        return new MyPageResponse(user.id(), user.nickname(), user.profileImageUrl(), "KAKAO", user.status(), 0, 0);
     }
 }

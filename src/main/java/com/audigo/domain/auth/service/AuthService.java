@@ -1,9 +1,9 @@
 package com.audigo.domain.auth.service;
 
+import com.audigo.domain.auth.dto.AuthLoginResult;
+import com.audigo.domain.auth.dto.AuthTokens;
 import com.audigo.domain.auth.dto.AuthUserResponse;
 import com.audigo.domain.auth.dto.KakaoLoginRequest;
-import com.audigo.domain.auth.dto.LoginResponse;
-import com.audigo.domain.auth.dto.TokenResponse;
 import com.audigo.domain.auth.entity.OAuthAccount;
 import com.audigo.domain.auth.entity.OAuthProvider;
 import com.audigo.domain.auth.oauth.KakaoOAuthClient;
@@ -18,6 +18,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class AuthService {
+
+    private static final String DEFAULT_NICKNAME = "사용자";
+    private static final int MAX_NICKNAME_LENGTH = 5;
 
     private final KakaoOAuthClient kakaoOAuthClient;
     private final OAuthAccountRepository oauthAccountRepository;
@@ -37,26 +40,19 @@ public class AuthService {
     }
 
     @Transactional
-    public LoginResponse loginWithKakao(KakaoLoginRequest request) {
+    public AuthLoginResult loginWithKakao(KakaoLoginRequest request) {
         if (!OAuthProvider.KAKAO.name().equalsIgnoreCase(request.provider())) {
-            throw new BusinessException(ErrorCode.INVALID_OAUTH_PROVIDER);
+            throw new BusinessException(ErrorCode.UNSUPPORTED_OAUTH_PROVIDER);
         }
 
         KakaoOAuthUserInfo oauthUser = kakaoOAuthClient.fetchUserInfo(request.authorizationCode());
         UserLoginResult result = findOrCreateUser(oauthUser);
-        TokenResponse tokens = tokenService.issue(result.user().id());
+        AuthTokens tokens = tokenService.issue(result.user().id());
 
-        return new LoginResponse(
-                tokens.accessToken(),
-                tokens.refreshToken(),
-                tokens.tokenType(),
-                tokens.accessTokenExpiresIn(),
-                tokens.refreshTokenExpiresIn(),
-                AuthUserResponse.of(result.user(), result.isNewUser())
-        );
+        return new AuthLoginResult(tokens, AuthUserResponse.of(result.user(), result.isNewUser()));
     }
 
-    public TokenResponse refresh(String refreshToken) {
+    public AuthTokens refresh(String refreshToken) {
         return tokenService.refresh(refreshToken);
     }
 
@@ -69,11 +65,14 @@ public class AuthService {
                 .findByProviderAndProviderUserId(OAuthProvider.KAKAO, oauthUser.providerUserId())
                 .map(account -> {
                     User user = account.user();
+                    if (!user.isActive()) {
+                        throw new BusinessException(ErrorCode.USER_INACTIVE);
+                    }
                     user.updateProfileImageUrl(oauthUser.profileImageUrl());
                     return new UserLoginResult(user, false);
                 })
                 .orElseGet(() -> {
-                    User user = userRepository.save(User.create(oauthUser.nickname(), oauthUser.profileImageUrl()));
+                    User user = userRepository.save(User.create(normalizeNickname(oauthUser.nickname()), oauthUser.profileImageUrl()));
                     oauthAccountRepository.save(OAuthAccount.create(
                             OAuthProvider.KAKAO,
                             oauthUser.providerUserId(),
@@ -87,5 +86,20 @@ public class AuthService {
             User user,
             boolean isNewUser
     ) {
+    }
+
+    private String normalizeNickname(String nickname) {
+        if (nickname == null) {
+            return DEFAULT_NICKNAME;
+        }
+        String normalized = nickname.replaceAll("\\s+", "")
+                .replaceAll("[^가-힣a-zA-Z0-9]", "");
+        if (normalized.length() > MAX_NICKNAME_LENGTH) {
+            normalized = normalized.substring(0, MAX_NICKNAME_LENGTH);
+        }
+        if (normalized.length() < 2) {
+            return DEFAULT_NICKNAME;
+        }
+        return normalized;
     }
 }

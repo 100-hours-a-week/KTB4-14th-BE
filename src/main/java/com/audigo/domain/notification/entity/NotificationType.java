@@ -1,8 +1,9 @@
 package com.audigo.domain.notification.entity;
 
 public enum NotificationType {
-    TRAVEL_READY,
-    NEW_CHAT,
-    TRAVEL_D1,
+    MATCH_SUCCESS,
+    NEW_MESSAGE,
+    TRAVEL_BEFORE,
+    TRAVEL_COMPLETE,
     TRAVEL_FAILED
 }

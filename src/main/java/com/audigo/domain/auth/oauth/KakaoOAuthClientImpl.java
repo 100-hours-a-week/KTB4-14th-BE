@@ -32,19 +32,19 @@ public class KakaoOAuthClientImpl implements KakaoOAuthClient {
     @Override
     public KakaoOAuthUserInfo fetchUserInfo(String authorizationCode) {
         if (properties.clientId() == null || properties.clientId().isBlank()) {
-            throw new BusinessException(ErrorCode.KAKAO_OAUTH_FAILED);
+            throw new BusinessException(ErrorCode.SERVICE_UNAVAILABLE);
         }
 
         try {
             KakaoTokenResponse token = exchangeCode(authorizationCode);
             if (token == null || token.accessToken() == null || token.accessToken().isBlank()) {
                 log.warn("Kakao token exchange succeeded but access_token was empty.");
-                throw new BusinessException(ErrorCode.KAKAO_OAUTH_FAILED);
+                throw new BusinessException(ErrorCode.OAUTH_AUTHENTICATION_FAILED);
             }
             KakaoUserResponse user = requestUserInfo(token.accessToken());
             if (user == null || user.id() == null) {
                 log.warn("Kakao user info response did not contain user id.");
-                throw new BusinessException(ErrorCode.KAKAO_OAUTH_FAILED);
+                throw new BusinessException(ErrorCode.OAUTH_AUTHENTICATION_FAILED);
             }
             return user.toUserInfo();
         } catch (RestClientResponseException exception) {
@@ -53,10 +53,13 @@ public class KakaoOAuthClientImpl implements KakaoOAuthClient {
                     exception.getStatusCode(),
                     exception.getResponseBodyAsString()
             );
-            throw new BusinessException(ErrorCode.KAKAO_OAUTH_FAILED);
+            if (exception.getStatusCode().is4xxClientError()) {
+                throw new BusinessException(ErrorCode.OAUTH_AUTHENTICATION_FAILED);
+            }
+            throw new BusinessException(ErrorCode.EXTERNAL_API_ERROR);
         } catch (RestClientException exception) {
             log.warn("Kakao OAuth request failed before receiving a response.", exception);
-            throw new BusinessException(ErrorCode.KAKAO_OAUTH_FAILED);
+            throw new BusinessException(ErrorCode.EXTERNAL_API_ERROR);
         }
     }
 
