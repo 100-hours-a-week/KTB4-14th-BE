@@ -19,6 +19,12 @@ spring:
   jackson:
     property-naming-strategy: SNAKE_CASE
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+
 audigo:
   cors:
     allowed-origins: ${AUDIGO_CORS_ALLOWED_ORIGINS:http://localhost:5173}

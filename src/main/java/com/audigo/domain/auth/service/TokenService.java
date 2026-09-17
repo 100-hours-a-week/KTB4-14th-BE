@@ -53,7 +53,7 @@ public class TokenService {
                 LocalDateTime.ofInstant(now.plusSeconds(refreshTokenTtlSeconds), ZoneId.systemDefault())
         ));
 
-        return new AuthTokens(accessToken, refreshToken, "Bearer", accessTokenTtlSeconds, refreshTokenTtlSeconds);
+        return new AuthTokens(accessToken, refreshToken, accessTokenTtlSeconds, refreshTokenTtlSeconds);
     }
 
     @Transactional
