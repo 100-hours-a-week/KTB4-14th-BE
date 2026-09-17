@@ -9,7 +9,10 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.OneToOne;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
+import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "notification_settings")
@@ -17,24 +20,33 @@ public class NotificationSetting {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    @Column(name = "notification_setting_id")
+    @Column(name = "id")
     private Long id;
 
     @OneToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "user_id", nullable = false, unique = true)
     private User user;
 
-    @Column(name = "travel_ready", nullable = false)
-    private boolean travelReady = true;
+    @Column(name = "match_success_enabled", nullable = false)
+    private boolean matchSuccessEnabled = true;
 
-    @Column(name = "new_chat", nullable = false)
-    private boolean newChat = true;
+    @Column(name = "chat_enabled", nullable = false)
+    private boolean chatEnabled = true;
 
-    @Column(name = "travel_d1", nullable = false)
-    private boolean travelD1 = true;
+    @Column(name = "travel_before_enabled", nullable = false)
+    private boolean travelBeforeEnabled = true;
 
-    @Column(name = "travel_failed", nullable = false)
-    private boolean travelFailed = true;
+    @Column(name = "travel_complete_enabled", nullable = false)
+    private boolean travelCompleteEnabled = true;
+
+    @Column(name = "notification_enabled", nullable = false)
+    private boolean notificationEnabled = true;
+
+    @Column(name = "created_at", nullable = false)
+    private LocalDateTime createdAt;
+
+    @Column(name = "updated_at", nullable = false)
+    private LocalDateTime updatedAt;
 
     protected NotificationSetting() {
     }
@@ -47,26 +59,61 @@ public class NotificationSetting {
         return new NotificationSetting(user);
     }
 
-    public boolean travelReady() {
-        return travelReady;
+    @PrePersist
+    void prePersist() {
+        LocalDateTime now = LocalDateTime.now();
+        this.createdAt = now;
+        this.updatedAt = now;
     }
 
-    public boolean newChat() {
-        return newChat;
+    @PreUpdate
+    void preUpdate() {
+        this.updatedAt = LocalDateTime.now();
     }
 
-    public boolean travelD1() {
-        return travelD1;
+    public boolean matchSuccessEnabled() {
+        return matchSuccessEnabled;
     }
 
-    public boolean travelFailed() {
-        return travelFailed;
+    public boolean chatEnabled() {
+        return chatEnabled;
     }
 
-    public void update(boolean travelReady, boolean newChat, boolean travelD1, boolean travelFailed) {
-        this.travelReady = travelReady;
-        this.newChat = newChat;
-        this.travelD1 = travelD1;
-        this.travelFailed = travelFailed;
+    public boolean travelBeforeEnabled() {
+        return travelBeforeEnabled;
+    }
+
+    public boolean travelCompleteEnabled() {
+        return travelCompleteEnabled;
+    }
+
+    public boolean notificationEnabled() {
+        return notificationEnabled;
+    }
+
+    public boolean enabledFor(NotificationType notificationType) {
+        if (!notificationEnabled) {
+            return false;
+        }
+        return switch (notificationType) {
+            case MATCH_SUCCESS -> matchSuccessEnabled;
+            case NEW_MESSAGE -> chatEnabled;
+            case TRAVEL_BEFORE -> travelBeforeEnabled;
+            case TRAVEL_COMPLETE, TRAVEL_FAILED -> travelCompleteEnabled;
+        };
+    }
+
+    public void update(
+            boolean matchSuccessEnabled,
+            boolean chatEnabled,
+            boolean travelBeforeEnabled,
+            boolean travelCompleteEnabled,
+            boolean notificationEnabled
+    ) {
+        this.matchSuccessEnabled = matchSuccessEnabled;
+        this.chatEnabled = chatEnabled;
+        this.travelBeforeEnabled = travelBeforeEnabled;
+        this.travelCompleteEnabled = travelCompleteEnabled;
+        this.notificationEnabled = notificationEnabled;
     }
 }

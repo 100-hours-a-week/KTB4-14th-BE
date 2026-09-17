@@ -1,9 +1,14 @@
 package com.audigo.domain.notification.dto;
 
 public record UpdateNotificationSettingsRequest(
-        boolean travelReady,
-        boolean newChat,
-        boolean travelD1,
-        boolean travelFailed
+        Boolean matchSuccessEnabled,
+        Boolean chatEnabled,
+        Boolean travelBeforeEnabled,
+        Boolean travelCompleteEnabled,
+        Boolean notificationEnabled,
+        Boolean travelReady,
+        Boolean newChat,
+        Boolean travelD1,
+        Boolean travelFailed
 ) {
 }

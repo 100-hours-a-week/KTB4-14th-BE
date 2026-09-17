@@ -15,6 +15,7 @@ public enum ErrorCode {
     FORBIDDEN(HttpStatus.FORBIDDEN, "forbidden"),
     USER_INACTIVE(HttpStatus.FORBIDDEN, "user_inactive"),
     USER_NOT_FOUND(HttpStatus.NOT_FOUND, "user_not_found"),
+    NOTIFICATION_NOT_FOUND(HttpStatus.NOT_FOUND, "notification_not_found"),
     VALIDATION_FAILED(HttpStatus.UNPROCESSABLE_ENTITY, "validation_failed"),
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "internal_server_error"),
     EXTERNAL_API_ERROR(HttpStatus.BAD_GATEWAY, "external_api_error"),
