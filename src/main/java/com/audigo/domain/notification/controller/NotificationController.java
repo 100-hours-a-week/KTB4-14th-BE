@@ -2,12 +2,15 @@ package com.audigo.domain.notification.controller;
 
 import com.audigo.domain.notification.dto.NotificationResponse;
 import com.audigo.domain.notification.dto.NotificationSettingsResponse;
+import com.audigo.domain.notification.dto.ReadNotificationsRequest;
 import com.audigo.domain.notification.dto.UnreadCountResponse;
 import com.audigo.domain.notification.dto.UpdateNotificationSettingsRequest;
 import com.audigo.domain.notification.service.NotificationService;
 import com.audigo.global.response.ApiResponse;
 import com.audigo.global.security.CurrentUser;
+import jakarta.validation.Valid;
 import java.util.List;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -15,6 +18,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @RestController
 public class NotificationController {
@@ -37,9 +41,20 @@ public class NotificationController {
         return ApiResponse.of("notification_unread_count_found", notificationService.unreadCount(currentUser.id()));
     }
 
+    @GetMapping(value = "/api/notifications/subscribe", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter subscribe() {
+        return notificationService.subscribe(currentUser.id());
+    }
+
     @PatchMapping("/api/notifications/{notificationId}/read")
     public ResponseEntity<Void> markRead(@PathVariable Long notificationId) {
         notificationService.markRead(currentUser.id(), notificationId);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PatchMapping("/api/notifications/read")
+    public ResponseEntity<Void> markRead(@Valid @RequestBody ReadNotificationsRequest request) {
+        notificationService.markRead(currentUser.id(), request);
         return ResponseEntity.noContent().build();
     }
 
