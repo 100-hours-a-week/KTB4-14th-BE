@@ -2,7 +2,6 @@ package com.audigo.domain.travel.entity;
 
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
-import java.util.Objects;
 
 @Entity
 @Table(name = "regions",
@@ -32,8 +31,24 @@ public class Region {
     }
 
     private Region(String name, String fullName) {
-        this.name = requireText(name, "지역명", 100);
-        this.fullName = requireText(fullName, "전체 지역명", 150);
+        if (name == null) {
+            throw new NullPointerException("지역명은(는) 필수입니다.");
+        }
+        String normalizedName = name.trim();
+        if (normalizedName.isEmpty() || normalizedName.length() > 100) {
+            throw new IllegalArgumentException("지역명은(는) 비어 있지 않고 100자 이하여야 합니다.");
+        }
+
+        if (fullName == null) {
+            throw new NullPointerException("전체 지역명은(는) 필수입니다.");
+        }
+        String normalizedFullName = fullName.trim();
+        if (normalizedFullName.isEmpty() || normalizedFullName.length() > 150) {
+            throw new IllegalArgumentException("전체 지역명은(는) 비어 있지 않고 150자 이하여야 합니다.");
+        }
+
+        this.name = normalizedName;
+        this.fullName = normalizedFullName;
     }
 
     public static Region create(String name, String fullName) {
@@ -74,11 +89,4 @@ public class Region {
         return updatedAt;
     }
 
-    private static String requireText(String value, String fieldName, int maxLength) {
-        String normalized = Objects.requireNonNull(value, fieldName + "은(는) 필수입니다.").trim();
-        if (normalized.isEmpty() || normalized.length() > maxLength) {
-            throw new IllegalArgumentException(fieldName + "은(는) 비어 있지 않고 " + maxLength + "자 이하여야 합니다.");
-        }
-        return normalized;
-    }
 }

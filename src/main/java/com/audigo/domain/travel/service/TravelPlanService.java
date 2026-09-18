@@ -89,12 +89,14 @@ public class TravelPlanService {
         }
     }
 
+    // 여행 테마와 음식 중복이 있는지 확인
     private void validateUniqueValues(List<TravelThemeType> themes, List<FoodType> foods) {
         if (hasDuplicates(themes) || hasDuplicates(foods)) {
             throw new BusinessException(ErrorCode.VALIDATION_FAILED);
         }
     }
 
+    // hashSet과 list 크기 비교해서 중복 여부 판단
     private boolean hasDuplicates(List<?> values) {
         return values != null && new HashSet<>(values).size() != values.size();
     }
