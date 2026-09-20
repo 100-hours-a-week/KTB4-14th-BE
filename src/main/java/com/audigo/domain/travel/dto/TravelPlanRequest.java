@@ -9,6 +9,7 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import java.time.LocalDateTime;
+import java.util.List;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record TravelPlanRequest(
@@ -35,8 +36,16 @@ public record TravelPlanRequest(
 
         @NotNull(message = "여행 취향은 필수입니다.")
         @Valid
-        TravelPreferenceRequest preference
+        TravelPreferenceRequest preference,
+
+        @JsonProperty("required_places")
+        @Valid
+        List<@NotNull(message = "필수 장소 항목은 비어 있을 수 없습니다.") RequiredPlaceRequest> requiredPlaces
 ) {
+    public TravelPlanRequest {
+        requiredPlaces = requiredPlaces == null ? List.of() : List.copyOf(requiredPlaces);
+    }
+
     @AssertTrue(message = "여행지 출발 시간은 도착 시간보다 늦어야 합니다.")
     public boolean isTravelPeriodValid() {
         return arrivalDatetime == null

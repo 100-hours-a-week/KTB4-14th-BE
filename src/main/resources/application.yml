@@ -38,3 +38,7 @@ audigo:
       client-id: ${KAKAO_REST_API_KEY:}
       client-secret: ${KAKAO_CLIENT_SECRET:}
       redirect-uri: ${KAKAO_REDIRECT_URI:http://localhost:5173/auth/kakao}
+
+  kakao:
+    map:
+      rest-api-key: ${KAKAO_MAP_REST_API_KEY:}

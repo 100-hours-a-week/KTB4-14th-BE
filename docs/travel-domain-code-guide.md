@@ -1,13 +1,24 @@
-# 여행 생성·취향 코드 가이드
+# 여행 생성·취향·필수 장소 코드 가이드
 
-이 문서는 현재 v1 와이어프레임에 포함된 여행 생성 화면을 기준으로 작성했다. 현재 백엔드 구현 범위는 다음 두 기능이다.
+이 문서는 현재 v1 와이어프레임의 여행 생성 화면을 기준으로 작성했다. 현재 백엔드 구현 범위는 다음과 같다.
+
+> 최종 장소 스키마는 사용자가 이 대화에서 제공한 ERD 기준을 따른다. `places`에는 `id`, `provider`, `provider_place_id`, `created_at`만 저장하며 `place_name`은 검색·화면 표시용으로만 사용한다.
+> 장소 생성 요청에 포함된 `place_name`, `address`, `latitude`, `longitude`는 저장하지 않고 요청 처리 중 AI 입력 컨텍스트로만 사용한다.
 
 - 지역 목록 조회: `GET /api/regions`
 - 여행 생성 요청: `POST /api/travel-plans`
   - 여행 기본 정보 생성(`TravelPlan`)
   - 여행 취향 생성(`TravelPreference`)
+- 장소 검색: `GET /api/places/search?region_id=1&keyword=성산일출봉&page=1&size=15`
+  - 백엔드가 지역 범위를 반영해 카카오 키워드 검색 API를 호출한다.
+  - 주소·위도·경도는 검색 응답과 화면 표시를 위한 값이며 저장하지 않는다.
+- 필수 장소 저장: `POST /api/travel-plans`의 `required_places`
+  - 선택된 장소의 `provider`, 카카오 `provider_place_id`만 `places`에 저장한다.
+  - `id`는 DB가 발급하고 `created_at`은 저장 시각으로 자동 생성한다.
+  - 장소 이름, 주소·위도·경도와 카카오 원본 `category`는 저장하지 않는다.
+  - 한 여행에서 같은 제공자·장소 ID를 두 번 등록할 수 없다.
 
-사용자가 장소를 검색하거나 필수 방문 장소를 선택하는 기능은 아직 개발 범위가 아니다. 따라서 현재 서비스는 카카오맵 API를 호출하지 않고, 장소를 저장하지도 않는다. 프론트가 과도기적으로 `required_places`를 함께 보내더라도 요청 DTO가 알 수 없는 필드로 무시한다. 프론트 코드는 이 변경에서 수정하지 않는다.
+장소 선택은 선택 사항이다. `required_places`를 생략하거나 빈 배열로 보내면 여행 계획과 취향만 저장된다.
 
 ## 1. 전체 처리 흐름
 
@@ -18,6 +29,7 @@ sequenceDiagram
     participant TC as TravelPlanController
     participant TS as TravelPlanService
     participant R as RegionRepository
+    participant PR as PlaceRepository
     participant DB as MySQL
 
     C->>S: 인증 쿠키 또는 Bearer Token
@@ -26,7 +38,9 @@ sequenceDiagram
     TC->>TS: CurrentUser.id(), TravelPlanRequest
     TS->>R: 지역 존재 여부 조회
     TS->>TS: TravelPlan·TravelPreference 생성
+    TS->>PR: 선택 장소 ID 조회 또는 장소 생성
     TS->>DB: 여행 계획과 취향 저장
+    TS->>DB: 여행별 필수 장소 연결 저장
     TS-->>TC: GENERATING 상태 TravelPlan
     TC-->>C: 202 Accepted + travel_plan_id
 ```
@@ -43,11 +57,11 @@ sequenceDiagram
 
 | 계층 | 책임 | 대표 파일 |
 | --- | --- | --- |
-| Controller | HTTP 경로 연결, 인증 사용자 식별, DTO 검증 시작, 응답 상태·형식 지정 | `TravelPlanController`, `RegionController` |
-| Service | 여행 생성 순서 조합, 지역 조회, 업무 규칙 검증, 엔티티 생성·저장 | `TravelPlanService` |
-| Repository | JPA를 이용한 지역·여행 계획 조회와 저장 | `RegionRepository`, `TravelPlanRepository` |
-| DTO | JSON 입력·출력 계약과 Bean Validation 규칙 선언 | `TravelPlanRequest`, `TravelPreferenceRequest` 등 |
-| Entity | DB 매핑, 객체 관계, 생성 시 도메인 불변식 보장 | `TravelPlan`, `TravelPreference` 등 |
+| Controller | HTTP 경로 연결, 인증 사용자 식별, DTO 검증 시작, 응답 상태·형식 지정 | `TravelPlanController`, `RegionController`, `PlaceController` |
+| Service | 여행 생성 순서 조합, 카카오 검색 중계, 지역·장소 조회, 업무 규칙 검증, 엔티티 생성·저장 | `TravelPlanService`, `KakaoPlaceSearchService` |
+| Repository | JPA를 이용한 지역·여행·장소 조회와 저장 | `RegionRepository`, `TravelPlanRepository`, `PlaceRepository`, `TravelPlanPlaceRepository` |
+| DTO | JSON 입력·출력 계약과 Bean Validation 규칙 선언 | `TravelPlanRequest`, `TravelPreferenceRequest`, `RequiredPlaceRequest`, `PlaceSearchResponse` |
+| Entity | DB 매핑, 객체 관계, 생성 시 도메인 불변식 보장 | `TravelPlan`, `TravelPreference`, `Place`, `TravelPlanPlace` 등 |
 
 ## 3. Controller
 
@@ -96,6 +110,16 @@ public ApiResponse<TravelPlanCreatedResponse> createTravelPlan(
 
 `GET /api/regions`를 처리한다. 서비스가 `fullName` 오름차순으로 조회한 지역 목록을 `RegionResponse`로 변환해 응답한다. 조회 결과가 없으면 오류가 아니라 빈 배열을 반환한다.
 
+### 3.3 `PlaceController`
+
+파일: [`src/main/java/com/audigo/domain/travel/controller/PlaceController.java`](../src/main/java/com/audigo/domain/travel/controller/PlaceController.java)
+
+`GET /api/places/search?region_id=지역ID&keyword=장소명&page=1&size=15`를 처리한다. 실제 카카오 검색 API 호출은 `KakaoPlaceSearchService`가 담당하고, 컨트롤러는 지역 ID·검색어·페이지·크기를 전달한 뒤 `PlaceSearchResponse`를 응답한다. 카카오 API 키가 없거나 외부 호출이 실패하면 서비스 불가·외부 API 오류로 처리한다.
+
+검색 API는 먼저 지역이 존재하는지 확인하고, 카카오에 보낼 검색어를 `지역 full_name + 검색어`로 조합한다. `size`는 최대 15건, 전체 결과는 최대 45건 범위로 제한한다. 검색만으로는 장소를 DB에 저장하지 않는다.
+
+로컬 실행 시 백엔드에는 `KAKAO_REST_API_KEY`를 설정해야 한다. 프론트에서 실제 JS 지도를 표시하려면 프론트 환경 변수 `VITE_KAKAO_JS_KEY`도 별도로 설정해야 한다. REST 키와 JavaScript 키는 카카오 개발자 콘솔에서 용도가 다른 키이므로 같은 값을 재사용하지 않는다.
+
 ## 4. DTO
 
 DTO는 외부 JSON의 모양과 입력 검증 규칙을 표현한다. 컨트롤러의 `@Valid`가 최상위 DTO에서 시작되고, `preference`에는 `@Valid`가 붙어 중첩 DTO 검증까지 전파된다.
@@ -112,13 +136,16 @@ DTO는 외부 JSON의 모양과 입력 검증 규칙을 표현한다. 컨트롤�
 | `headcount` | `headcount` | `@NotNull`, 1~30 |
 | `companionType` | `companion_type` | `@NotNull` |
 | `preference` | `preference` | `@NotNull`, `@Valid` |
+| `requiredPlaces` | `required_places` | 선택값, 각 항목 `@Valid` |
 
 객체 수준 검증은 다음과 같다.
 
 - `isTravelPeriodValid()`: 도착 일시가 출발 일시보다 앞서야 한다.
 - `isHeadcountCompatibleWithCompanion()`: `SOLO`는 1명, 그 외 동행 유형은 2명 이상이어야 한다.
 
-`@JsonIgnoreProperties(ignoreUnknown = true)`가 붙어 있으므로 현재 DTO에 정의되지 않은 `required_places`가 프론트 요청에 남아 있어도 무시된다. 이는 장소 기능을 구현했다는 의미가 아니며, 프론트 변경 없이 현재 범위만 처리하기 위한 호환 설정이다.
+`required_places`가 없으면 컴팩트 생성자에서 빈 목록으로 바뀐다. 따라서 장소 등록은 필수가 아니다. 알 수 없는 추가 필드는 기존처럼 무시해 버전 호환성을 유지한다.
+
+각 `RequiredPlaceRequest`는 `provider`, 카카오 장소 ID(`provider_place_id`), 장소명, 주소, 위도·경도를 검증한다. 이 값들은 요청 처리 중 AI 입력 컨텍스트로만 사용하고 `Place` 엔티티에는 저장하지 않는다. `place_type`이 생략되면 우리 서비스의 기본 분류인 `TOURISM`으로 처리하며, 카카오 원본 `category`는 사용하지 않는다.
 
 ### 4.2 `TravelPreferenceRequest`
 
@@ -148,6 +175,8 @@ DTO는 외부 JSON의 모양과 입력 검증 규칙을 표현한다. 컨트롤�
 
 - [`RegionResponse`](../src/main/java/com/audigo/domain/travel/dto/RegionResponse.java): 지역을 `region_id`, `name`, `full_name`으로 변환한다.
 - [`TravelPlanCreatedResponse`](../src/main/java/com/audigo/domain/travel/dto/TravelPlanCreatedResponse.java): 생성된 여행의 `travel_plan_id`와 `status`만 반환한다.
+- [`PlaceSearchResponse`](../src/main/java/com/audigo/domain/travel/dto/PlaceSearchResponse.java): 카카오 검색 결과 목록과 페이지 메타데이터를 반환한다.
+- [`PlaceSearchItemResponse`](../src/main/java/com/audigo/domain/travel/dto/PlaceSearchItemResponse.java): 화면 표시용 `provider`, `provider_place_id`, `place_name`, 주소, 위도·경도를 담는다. 백엔드는 위도·경도를 `BigDecimal`로 변환해 정밀도를 유지하고, 검색 응답의 주소·좌표는 영속화하지 않는다.
 
 프로젝트의 Jackson 전역 설정은 기본적으로 `SNAKE_CASE`이고, API 필드명이 명확해야 하는 DTO에는 `@JsonProperty`가 함께 선언되어 있다.
 
@@ -170,8 +199,10 @@ DTO는 외부 JSON의 모양과 입력 검증 규칙을 표현한다. 컨트롤�
 3. `TravelPlan.create(...)`로 여행 기본 정보를 만들고 초기 상태를 `GENERATING`으로 설정한다.
 4. `createPreference(...)`가 요청 DTO의 취향 값을 `TravelPreference.create(...)`에 전달한다.
 5. `travelPlan.attachPreference(preference)`로 여행과 취향의 1:1 관계를 연결한다.
-6. `travelPlanRepository.save(travelPlan)`으로 저장한다. `TravelPlan.preference`의 cascade 설정에 따라 취향과 테마·음식 연결 엔티티도 함께 저장된다.
-7. 저장된 `TravelPlan`을 컨트롤러에 반환한다.
+6. `addRequiredPlaces(...)`가 필수 장소 중복을 확인하고, 장소 ID가 이미 있으면 기존 `Place`를 재사용한다. 새 장소라면 `provider`, `provider_place_id`만 `places`에 저장한다. `created_at`은 엔티티의 `@PrePersist`에서 생성된다. 요청의 장소명·주소·좌표는 이 저장 과정에서 버리지 않고 AI 입력 컨텍스트로 사용할 수 있지만 영속화하지 않는다.
+7. `TravelPlanPlace`를 여행에 연결한다. 장소 순서와 `USER_REQUIRED` 출처, 내부 `PlaceType`을 저장하며 좌표는 저장하지 않는다.
+8. `travelPlanRepository.save(travelPlan)`으로 저장한다. `TravelPlan.preference`와 `requiredPlaces`의 cascade 설정에 따라 취향·테마·음식·여행별 장소 연결도 함께 저장된다.
+9. 저장된 `TravelPlan`을 컨트롤러에 반환한다.
 
 현재 `createPreference`는 별도 HTTP 엔드포인트가 아니다. 여행 생성 요청 안의 `preference` 객체를 저장하는 내부 생성 로직이다.
 
@@ -185,6 +216,10 @@ DTO가 도착 일시와 출발 일시의 순서를 확인하고, 서비스는 �
 
 서비스는 테마와 음식 목록을 `HashSet`으로 바꾼 뒤 크기를 비교한다. 중복 값이 있으면 집합의 크기가 원래 목록보다 작아지므로 `VALIDATION_FAILED`를 발생시킨다. 이 검증은 DTO의 개수·null 검증과 별개로, 목록 안의 값 관계를 확인하기 위한 것이다.
 
+#### 필수 장소 중복
+
+`provider`와 `provider_place_id`를 합친 식별자를 `HashSet`에 넣어 같은 장소가 한 요청에 여러 번 포함됐는지 확인한다. 중복이면 `DUPLICATED_REQUIRED_PLACE`를 반환한다. DB의 `places(provider, provider_place_id)`와 `travel_plan_places(travel_plan_id, place_id)` 유니크 제약도 같은 장소의 중복 저장을 한 번 더 방지한다.
+
 #### 인증 사용자
 
 서비스는 사용자 탈퇴·정지 기능을 전제로 한 활성 상태 재조회는 하지 않는다. 컨트롤러가 인증 컨텍스트에서 얻은 `CurrentUser.id()`만 사용해 `TravelPlan.userId`에 저장한다.
@@ -197,6 +232,8 @@ DTO가 도착 일시와 출발 일시의 순서를 확인하고, 서비스는 �
 | --- | --- | --- |
 | [`TravelPlanRepository`](../src/main/java/com/audigo/domain/travel/repository/TravelPlanRepository.java) | 여행 계획 CRUD | 없음 |
 | [`RegionRepository`](../src/main/java/com/audigo/domain/travel/repository/RegionRepository.java) | 지역 CRUD·정렬 목록 조회 | `findAllByOrderByFullNameAsc()` |
+| [`PlaceRepository`](../src/main/java/com/audigo/domain/travel/repository/PlaceRepository.java) | 카카오 장소 최소 정보 조회·저장 | `findByProviderAndProviderPlaceId()` |
+| [`TravelPlanPlaceRepository`](../src/main/java/com/audigo/domain/travel/repository/TravelPlanPlaceRepository.java) | 여행과 필수 장소 연결 CRUD | 없음 |
 
 서비스가 직접 SQL을 작성하지 않고 레포지토리 메서드를 호출하면 Spring Data JPA가 엔티티 매핑을 기준으로 조회·저장을 수행한다.
 
@@ -257,6 +294,22 @@ DTO가 도착 일시와 출발 일시의 순서를 확인하고, 서비스는 �
 
 두 엔티티는 여행 취향의 자식 데이터이며, 취향 저장 시 cascade로 함께 저장된다.
 
+### 7.5 `Place`와 `TravelPlanPlace`
+
+파일: [`src/main/java/com/audigo/domain/travel/entity/Place.java`](../src/main/java/com/audigo/domain/travel/entity/Place.java), [`src/main/java/com/audigo/domain/travel/entity/TravelPlanPlace.java`](../src/main/java/com/audigo/domain/travel/entity/TravelPlanPlace.java)
+
+`Place`는 카카오 장소의 공유 가능한 최소 식별 정보다.
+
+- `provider`: 현재 `KAKAO`
+- `providerPlaceId`: 카카오 장소 ID
+- `createdAt`: 장소 레코드 생성 시각
+
+`Place.id`는 DB가 자동 발급하는 내부 기본키이고, `travel_plan_places.place_id`가 이 값을 참조한다. 프론트가 내부 `id`를 보내는 것이 아니라 `provider`와 `provider_place_id`로 장소를 식별한다.
+
+장소 이름, 위도·경도, 주소, 카카오 원본 `category`, 장소 URL은 `Place`에 저장하지 않는다. 장소 이름·주소·좌표는 검색 응답과 지도 표시용으로만 사용한다.
+
+`TravelPlanPlace`는 특정 여행에서 그 장소가 필수 방문인지와 순서를 연결한다. 현재 사용자가 추가한 장소는 `source=USER_REQUIRED`로 저장되고, `placeType`은 `RESTAURANT`, `ACCOMMODATION`, `TOURISM` 중 하나다. 카카오의 원본 카테고리를 그대로 저장하지 않는다.
+
 ## 8. 검증 단계와 오류
 
 ### 8.1 요청 바인딩 단계
@@ -281,6 +334,7 @@ DTO 애너테이션만으로 표현하기 어려운 지역 존재 여부, 과거
 | 상황 | 오류 코드 |
 | --- | --- |
 | 지역 없음 | `REGION_NOT_FOUND` |
+| 같은 여행에 같은 필수 장소를 중복 등록 | `DUPLICATED_REQUIRED_PLACE` |
 | 여행 조건·중복·범위 오류 | `VALIDATION_FAILED` |
 
 ## 9. 데이터 저장 관계
@@ -291,6 +345,7 @@ TravelPlan
  └─ 1:1 TravelPreference
       ├─ 1:N TravelPreferenceTheme
       └─ 1:N TravelPreferenceFood
+      └─ 1:N TravelPlanPlace ── N:1 Place
 ```
 
 여행 생성 요청 하나가 성공하면 다음 데이터가 하나의 트랜잭션 안에서 저장된다.
@@ -299,17 +354,17 @@ TravelPlan
 2. `travel_preferences`
 3. `travel_preference_themes`
 4. `travel_preference_foods`
+5. `places` (선택 장소가 있을 때만)
+6. `travel_plan_places` (선택 장소가 있을 때만)
 
-장소 테이블이나 카카오맵 API 호출은 이 흐름에 포함되지 않는다.
+장소가 없는 요청도 정상 처리된다. 장소가 있는 경우에도 좌표는 위 저장 목록에 포함되지 않는다.
 
 ## 10. 현재 범위 밖의 후속 기능
 
-- 카카오맵 키워드 검색·장소 상세 조회
-- 장소 선택·필수 장소 저장
-- AI 생성 작업 생성·실행·폴링
+- AI 서버 작업 생성·상태 폴링·결과 저장
 - 생성된 일정·경로 저장
 
-현재 `GENERATING`은 향후 AI 생성을 연결하기 위한 초기 상태일 뿐, 이 코드가 AI 생성을 완료하거나 상태를 변경하지는 않는다.
+현재 `GENERATING`은 여행·취향·선택 장소 저장이 완료되고 AI 작업을 시작할 준비가 된 상태다. AI 서버 URL과 작업 생성·상태 조회 계약이 확정되면 저장된 여행 조건과 요청 처리 중 확보한 장소명·주소·좌표를 하나의 AI 요청 DTO로 묶어 AI 어댑터에 전달해야 한다. 해당 장소 정보는 DB에 저장하지 않는다.
 
 ## 11. 변경 시 확인할 체크리스트
 
@@ -317,5 +372,7 @@ TravelPlan
 - `TravelPlanRequest`와 `TravelPreferenceRequest`의 기본 검증을 갱신했는가?
 - 서비스와 엔티티가 같은 예산·중복 규칙을 사용하는가?
 - `TravelPlan`의 preference owning side가 연결되어 있는가?
-- 장소·카카오맵 로직을 현재 v1 범위에 실수로 포함하지 않았는가?
-- 생성 로직 변경 후 `TravelPlanServiceTest`와 DTO 검증 테스트를 실행했는가?
+- 장소 검색 결과에서 카카오 원본 `category`를 저장하거나 분류 기준으로 사용하지 않았는가?
+- 좌표를 `Place`나 `TravelPlanPlace` 컬럼에 추가하지 않았는가?
+- 장소가 선택되지 않은 요청도 정상 처리되는가?
+- 생성 로직 변경 후 서비스·DTO 검증 테스트를 실행했는가?

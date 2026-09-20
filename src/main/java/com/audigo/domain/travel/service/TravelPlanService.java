@@ -1,20 +1,27 @@
 package com.audigo.domain.travel.service;
 
 import com.audigo.domain.travel.dto.RegionResponse;
+import com.audigo.domain.travel.dto.RequiredPlaceRequest;
 import com.audigo.domain.travel.dto.TravelPlanRequest;
 import com.audigo.domain.travel.dto.TravelPreferenceRequest;
 import com.audigo.domain.travel.entity.FoodType;
+import com.audigo.domain.travel.entity.Place;
+import com.audigo.domain.travel.entity.PlaceProvider;
+import com.audigo.domain.travel.entity.TravelPlaceSource;
+import com.audigo.domain.travel.entity.TravelPlanPlace;
 import com.audigo.domain.travel.entity.Region;
 import com.audigo.domain.travel.entity.TravelPlan;
 import com.audigo.domain.travel.entity.TravelPreference;
 import com.audigo.domain.travel.entity.TravelThemeType;
 import com.audigo.domain.travel.repository.RegionRepository;
+import com.audigo.domain.travel.repository.PlaceRepository;
 import com.audigo.domain.travel.repository.TravelPlanRepository;
 import com.audigo.global.error.BusinessException;
 import com.audigo.global.error.ErrorCode;
 import java.time.LocalDateTime;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,13 +31,16 @@ public class TravelPlanService {
 
     private final TravelPlanRepository travelPlanRepository;
     private final RegionRepository regionRepository;
+    private final PlaceRepository placeRepository;
 
     public TravelPlanService(
             TravelPlanRepository travelPlanRepository,
-            RegionRepository regionRepository
+            RegionRepository regionRepository,
+            PlaceRepository placeRepository
     ) {
         this.travelPlanRepository = travelPlanRepository;
         this.regionRepository = regionRepository;
+        this.placeRepository = placeRepository;
     }
 
     // 지역 풀네임 오름차순 정렬
@@ -60,7 +70,43 @@ public class TravelPlanService {
 
         TravelPreference preference = createPreference(travelPlan, request.preference());
         travelPlan.attachPreference(preference);
+
+        addRequiredPlaces(travelPlan, request.requiredPlaces());
         return travelPlanRepository.save(travelPlan);
+    }
+
+    private void addRequiredPlaces(TravelPlan travelPlan, List<RequiredPlaceRequest> requests) {
+        validateRequiredPlaces(requests);
+        for (int index = 0; index < requests.size(); index++) {
+            RequiredPlaceRequest request = requests.get(index);
+            PlaceProvider provider = request.provider();
+            Place place = placeRepository.findByProviderAndProviderPlaceId(
+                            provider,
+                            request.providerPlaceId()
+                    )
+                    .orElseGet(() -> placeRepository.save(Place.create(
+                            provider,
+                            request.providerPlaceId()
+                    )));
+
+            travelPlan.addRequiredPlace(TravelPlanPlace.create(
+                    travelPlan,
+                    place,
+                    request.placeType(),
+                    TravelPlaceSource.USER_REQUIRED,
+                    request.resolvedOrder(index)
+            ));
+        }
+    }
+
+    private void validateRequiredPlaces(List<RequiredPlaceRequest> requests) {
+        Set<String> identifiers = new HashSet<>();
+        for (RequiredPlaceRequest request : requests) {
+            String identifier = request.provider() + ":" + request.providerPlaceId();
+            if (!identifiers.add(identifier)) {
+                throw new BusinessException(ErrorCode.DUPLICATED_REQUIRED_PLACE);
+            }
+        }
     }
 
     //2단계

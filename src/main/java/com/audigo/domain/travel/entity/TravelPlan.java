@@ -2,6 +2,9 @@ package com.audigo.domain.travel.entity;
 
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 @Entity
 @Table(name = "travel_plans")
@@ -37,6 +40,10 @@ public class TravelPlan {
 
     @OneToOne(mappedBy = "travelPlan", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     private TravelPreference preference;
+
+    @OneToMany(mappedBy = "travelPlan", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("placeOrder ASC")
+    private List<TravelPlanPlace> requiredPlaces = new ArrayList<>();
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
@@ -119,6 +126,18 @@ public class TravelPlan {
         this.preference = java.util.Objects.requireNonNull(preference, "여행 취향은 필수입니다.");
     }
 
+    public void addRequiredPlace(TravelPlanPlace requiredPlace) {
+        TravelPlanPlace value = java.util.Objects.requireNonNull(requiredPlace, "필수 장소는 필수입니다.");
+        boolean duplicated = requiredPlaces.stream()
+                .map(TravelPlanPlace::getPlace)
+                .anyMatch(place -> place.getProvider() == value.getPlace().getProvider()
+                        && place.getProviderPlaceId().equals(value.getPlace().getProviderPlaceId()));
+        if (duplicated) {
+            throw new IllegalArgumentException("필수 장소는 중복 등록할 수 없습니다.");
+        }
+        this.requiredPlaces.add(value);
+    }
+
     // getter
     public Long getId() {
         return id;
@@ -154,6 +173,10 @@ public class TravelPlan {
 
     public TravelPreference getPreference() {
         return preference;
+    }
+
+    public List<TravelPlanPlace> getRequiredPlaces() {
+        return Collections.unmodifiableList(requiredPlaces);
     }
 
     public LocalDateTime getCreatedAt(){
