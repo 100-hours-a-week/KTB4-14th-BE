@@ -7,9 +7,15 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 public record TravelPlanCreatedResponse(
         @JsonProperty("travel_plan_id")
         Long travelPlanId,
+        @JsonProperty("generation_job_id")
+        Long generationJobId,
         TravelPlanStatus status
 ) {
     public static TravelPlanCreatedResponse from(TravelPlan travelPlan) {
-        return new TravelPlanCreatedResponse(travelPlan.getId(), travelPlan.getStatus());
+        return new TravelPlanCreatedResponse(travelPlan.getId(), null, travelPlan.getStatus());
+    }
+
+    public static TravelPlanCreatedResponse from(TravelPlan travelPlan, Long generationJobId) {
+        return new TravelPlanCreatedResponse(travelPlan.getId(), generationJobId, travelPlan.getStatus());
     }
 }

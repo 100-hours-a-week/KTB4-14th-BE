@@ -16,6 +16,7 @@ import com.audigo.domain.travel.entity.TravelThemeType;
 import com.audigo.domain.travel.repository.RegionRepository;
 import com.audigo.domain.travel.repository.PlaceRepository;
 import com.audigo.domain.travel.repository.TravelPlanRepository;
+import com.audigo.domain.travel.repository.TravelGenerationJobRepository;
 import com.audigo.global.error.BusinessException;
 import com.audigo.global.error.ErrorCode;
 import java.time.LocalDateTime;
@@ -32,15 +33,18 @@ public class TravelPlanService {
     private final TravelPlanRepository travelPlanRepository;
     private final RegionRepository regionRepository;
     private final PlaceRepository placeRepository;
+    private final TravelGenerationJobRepository travelGenerationJobRepository;
 
     public TravelPlanService(
             TravelPlanRepository travelPlanRepository,
             RegionRepository regionRepository,
-            PlaceRepository placeRepository
+            PlaceRepository placeRepository,
+            TravelGenerationJobRepository travelGenerationJobRepository
     ) {
         this.travelPlanRepository = travelPlanRepository;
         this.regionRepository = regionRepository;
         this.placeRepository = placeRepository;
+        this.travelGenerationJobRepository = travelGenerationJobRepository;
     }
 
     // 지역 풀네임 오름차순 정렬
@@ -72,7 +76,23 @@ public class TravelPlanService {
         travelPlan.attachPreference(preference);
 
         addRequiredPlaces(travelPlan, request.requiredPlaces());
-        return travelPlanRepository.save(travelPlan);
+        TravelPlan savedPlan = travelPlanRepository.save(travelPlan);
+        travelGenerationJobRepository.save(com.audigo.domain.travel.entity.TravelGenerationJob.create(savedPlan));
+        return savedPlan;
+    }
+
+    @Transactional
+    public TravelPlan regenerateTravelPlan(Long userId, Long travelPlanId) {
+        TravelPlan travelPlan = travelPlanRepository.findByIdAndUserId(travelPlanId, userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.VALIDATION_FAILED));
+        travelGenerationJobRepository.findTopByTravelPlanIdOrderByIdDesc(travelPlanId)
+                .filter(job -> job.getStatus() == com.audigo.domain.travel.entity.TravelPlanStatus.GENERATING)
+                .ifPresent(job -> {
+                    throw new BusinessException(ErrorCode.VALIDATION_FAILED);
+                });
+        travelPlan.restartGeneration();
+        travelGenerationJobRepository.save(com.audigo.domain.travel.entity.TravelGenerationJob.create(travelPlan));
+        return travelPlan;
     }
 
     private void addRequiredPlaces(TravelPlan travelPlan, List<RequiredPlaceRequest> requests) {

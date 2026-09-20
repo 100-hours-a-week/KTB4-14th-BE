@@ -171,6 +171,18 @@ public class TravelPlan {
         return status;
     }
 
+    public void markCompleted() {
+        this.status = TravelPlanStatus.COMPLETED;
+    }
+
+    public void markFailed() {
+        this.status = TravelPlanStatus.FAILED;
+    }
+
+    public void restartGeneration() {
+        this.status = TravelPlanStatus.GENERATING;
+    }
+
     public TravelPreference getPreference() {
         return preference;
     }
