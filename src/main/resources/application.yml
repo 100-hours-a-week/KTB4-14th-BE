@@ -5,7 +5,7 @@ spring:
   application:
     name: audigo-be
   datasource:
-    url: jdbc:mysql://127.0.0.1:3306/audigo?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
+    url: ${SPRING_DATASOURCE_URL}
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
