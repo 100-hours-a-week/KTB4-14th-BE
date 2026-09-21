@@ -49,7 +49,7 @@ public class TravelPlanController {
         );
     }
 
-    @GetMapping("/{travelPlanId}/status")
+    @GetMapping({"/{travelPlanId}/status", "/{travelPlanId}"})
     public ApiResponse<TravelGenerationStatusResponse> getGenerationStatus(
             @PathVariable Long travelPlanId
     ) {
@@ -59,7 +59,7 @@ public class TravelPlanController {
         );
     }
 
-    @PostMapping("/{travelPlanId}/regenerate")
+    @PostMapping({"/{travelPlanId}/regenerate", "/{travelPlanId}/regeneration"})
     @ResponseStatus(HttpStatus.ACCEPTED)
     public ApiResponse<TravelPlanCreatedResponse> regenerate(
             @PathVariable Long travelPlanId

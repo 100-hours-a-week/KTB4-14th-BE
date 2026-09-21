@@ -29,9 +29,7 @@ public record TravelGenerationStatusResponse(
                         GenerationStepResponse.of(TravelGenerationStage.STAY_RECOMMEND,
                                 stateOf(states, TravelGenerationStage.STAY_RECOMMEND, job.getStatus())),
                         GenerationStepResponse.of(TravelGenerationStage.ROUTE_OPTIMIZE,
-                                stateOf(states, TravelGenerationStage.ROUTE_OPTIMIZE, job.getStatus())),
-                        GenerationStepResponse.of(TravelGenerationStage.MUSIC_RECOMMEND,
-                                stateOf(states, TravelGenerationStage.MUSIC_RECOMMEND, job.getStatus()))
+                                stateOf(states, TravelGenerationStage.ROUTE_OPTIMIZE, job.getStatus()))
                 ),
                 job.getErrorMessage()
         );

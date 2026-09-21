@@ -1,5 +1,6 @@
 package com.audigo.domain.travel.entity;
 
 public enum TravelPlaceSource {
-    USER_REQUIRED
+    USER_REQUIRED,
+    AI_RECOMMENDED
 }

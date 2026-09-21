@@ -8,7 +8,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.stereotype.Component;
 
-// SSE 단계 진행 상태와 아직 일정 테이블로 변환되지 않은 원문 결과를 보관
+// SSE 단계 진행 상태와 일정 저장에 사용할 원문 결과를 보관
 // 서버가 재시작되면 초기화되며, 전체 작업 상태는 DB에서 복구
 @Component
 public class TravelGenerationProgressStore {

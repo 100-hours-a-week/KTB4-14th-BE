@@ -12,6 +12,7 @@ import com.audigo.global.error.ErrorCode;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Locale;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.springframework.stereotype.Service;
@@ -22,15 +23,18 @@ public class TravelGenerationJobService {
 
     private final TravelGenerationJobRepository jobRepository;
     private final TravelGenerationProgressStore progressStore;
+    private final TravelItineraryPersistenceService itineraryPersistenceService;
     private final ObjectMapper objectMapper;
 
     public TravelGenerationJobService(
             TravelGenerationJobRepository jobRepository,
             TravelGenerationProgressStore progressStore,
+            TravelItineraryPersistenceService itineraryPersistenceService,
             ObjectMapper objectMapper
     ) {
         this.jobRepository = jobRepository;
         this.progressStore = progressStore;
+        this.itineraryPersistenceService = itineraryPersistenceService;
         this.objectMapper = objectMapper;
     }
 
@@ -61,8 +65,6 @@ public class TravelGenerationJobService {
         jobRepository.save(job);
         progressStore.initialize(jobId);
         progressStore.update(jobId, TravelGenerationStage.PLACE_RECOMMEND,
-                TravelGenerationStageState.RUNNING, null);
-        progressStore.update(jobId, TravelGenerationStage.MUSIC_RECOMMEND,
                 TravelGenerationStageState.RUNNING, null);
     }
 
@@ -159,9 +161,17 @@ public class TravelGenerationJobService {
 
     private void completeIfReady(TravelGenerationJob job) {
         Map<TravelGenerationStage, TravelGenerationStageState> states = progressStore.states(job.getId());
-        boolean ready = states.size() == TravelGenerationStage.values().length
-                && states.values().stream().allMatch(state -> state == TravelGenerationStageState.DONE);
+        boolean ready = List.of(
+                        TravelGenerationStage.PLACE_RECOMMEND,
+                        TravelGenerationStage.STAY_RECOMMEND,
+                        TravelGenerationStage.ROUTE_OPTIMIZE
+                ).stream()
+                .allMatch(stage -> states.get(stage) == TravelGenerationStageState.DONE);
         if (!ready) {
+            return;
+        }
+        if (!itineraryPersistenceService.persistIfPresent(job)) {
+            markFailed(job, "AI 서버가 일정 결과를 보내지 않았습니다.");
             return;
         }
         job.complete();
