@@ -4,6 +4,7 @@ import com.audigo.domain.travel.dto.AiTravelGenerationRequest;
 import com.audigo.domain.travel.dto.RequiredPlaceRequest;
 import com.audigo.domain.travel.dto.TravelPlanRequest;
 import com.audigo.domain.travel.dto.TravelPreferenceRequest;
+import com.audigo.domain.travel.entity.PlaceType;
 import com.audigo.domain.travel.entity.TravelPlan;
 import com.audigo.domain.travel.entity.TravelPlanPlace;
 import com.audigo.domain.travel.entity.TravelPreferenceFood;
@@ -71,7 +72,7 @@ public class TravelGenerationRequestFactory {
                         null,
                         null,
                         null,
-                        place.getPlaceType(),
+                        aiCategory(place.getPlaceType()),
                         place.getPlaceOrder()
                 ))
                 .toList();
@@ -96,8 +97,12 @@ public class TravelGenerationRequestFactory {
                 place.address(),
                 place.latitude(),
                 place.longitude(),
-                place.placeType(),
+                aiCategory(place.placeType()),
                 place.order()
         );
+    }
+
+    private String aiCategory(PlaceType placeType) {
+        return placeType == null ? PlaceType.TOURISM.name() : placeType.name();
     }
 }

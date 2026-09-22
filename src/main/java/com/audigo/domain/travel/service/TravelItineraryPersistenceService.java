@@ -74,18 +74,21 @@ public class TravelItineraryPersistenceService {
     }
 
     /**
-     * SSE 단계 payload 중 문서의 result.days[].stops[] 형태를 찾았을 때만 저장한다.
-     * AI가 완료 이벤트만 보내는 동안에는 빈 일정을 만들지 않고 기존 흐름을 유지한다.
+     * SSE 단계 payload의 일정·경로 결과를 저장한다.
+     * 축약 결과에는 필수 장소 fallback을 적용하고, 일정과 연결할 수 없는 결과는 저장하지 않는다.
      */
     @Transactional
     public boolean persistIfPresent(TravelGenerationJob job) {
+        TravelPlan plan = job.getTravelPlan();
         JsonNode result = findResult(job.getId());
         JsonNode daysNode = result == null ? null : result.get("days");
         if (daysNode == null || !daysNode.isArray() || daysNode.isEmpty()) {
-            return false;
+            daysNode = fallbackDaysFromRequiredPlaces(result, plan);
+            if (daysNode == null) {
+                return false;
+            }
         }
 
-        TravelPlan plan = job.getTravelPlan();
         clearExisting(plan.getId());
 
         Map<String, TravelPlanPlace> planPlaces = new HashMap<>();
@@ -122,7 +125,7 @@ public class TravelItineraryPersistenceService {
                     continue;
                 }
                 PlaceProvider provider = parseProvider(text(stop, "provider"));
-                PlaceType placeType = parsePlaceType(text(stop, "place_type", "placeType", "type"));
+                PlaceType placeType = parsePlaceType(text(stop, "category", "place_type", "placeType", "type"));
                 TravelPlanPlace planPlace = planPlaces.get(key(provider, providerPlaceId));
                 if (planPlace == null) {
                     Place place = placeRepository.findByProviderAndProviderPlaceId(provider, providerPlaceId)
@@ -139,7 +142,7 @@ public class TravelItineraryPersistenceService {
                 }
                 usedPlanPlaceIds.add(planPlace.getId());
 
-                int sequence = positiveInt(first(stop, "sequence", "order", "sort_order"), fallbackSequence);
+                int sequence = positiveInt(first(stop, "sequence", "order"), fallbackSequence);
                 if (!sequences.add(sequence)) {
                     throw new IllegalArgumentException("AI 일정의 방문 순서가 중복되었습니다.");
                 }
@@ -159,10 +162,11 @@ public class TravelItineraryPersistenceService {
                 itemsBySequence.put(new DaySequence(dayNumber, sequence), item);
                 metadataStore.putPlace(item.getId(), new TravelItineraryMetadataStore.PlaceMetadata(
                         text(stop, "place_name", "placeName", "name"),
-                        text(stop, "address", "road_address", "roadAddress"),
+                        text(stop, "road_address", "roadAddress", "address"),
                         decimal(stop, "latitude", "lat"),
                         decimal(stop, "longitude", "lng", "lon")
                 ));
+                collectRouteFromPrevious(dayNumber, stop, sequence, pendingRoutes);
                 collectRoutes(dayNumber, stop, pendingRoutes);
                 fallbackSequence++;
             }
@@ -267,6 +271,40 @@ public class TravelItineraryPersistenceService {
         }
     }
 
+    /**
+     * 축약된 AI Mock처럼 route_segments만 전달된 경우에도 기존 필수 장소를 일정으로 연결한다.
+     * 실제 AI가 days를 전달하면 그 결과를 우선 사용하며, 여러 날짜를 추정해야 하는 경우에는
+     * 잘못된 일정을 만들지 않도록 저장을 거부한다.
+     */
+    private ArrayNode fallbackDaysFromRequiredPlaces(JsonNode result, TravelPlan plan) {
+        JsonNode routeSegments = result == null ? null : first(result, "route_segments", "routes");
+        if (routeSegments == null || !routeSegments.isArray() || routeSegments.isEmpty()
+                || plan.getRequiredPlaces().isEmpty()) {
+            return null;
+        }
+        for (JsonNode route : routeSegments) {
+            if (positiveInt(first(route, "day_number", "day"), 1) != 1) {
+                return null;
+            }
+        }
+
+        ObjectNode day = objectMapper.createObjectNode();
+        day.put("day_number", 1);
+        day.put("date", plan.getArrivalDatetime().toLocalDate().toString());
+        ArrayNode stops = day.putArray("stops");
+        int sequence = 1;
+        for (TravelPlanPlace requiredPlace : plan.getRequiredPlaces()) {
+            ObjectNode stop = stops.addObject();
+            stop.put("provider", requiredPlace.getPlace().getProvider().name());
+            stop.put("provider_place_id", requiredPlace.getPlace().getProviderPlaceId());
+            stop.put("sequence", sequence++);
+            stop.put("category", requiredPlace.getPlaceType().name());
+        }
+        ArrayNode days = objectMapper.createArrayNode();
+        days.add(day);
+        return days;
+    }
+
     private void clearExisting(Long travelPlanId) {
         List<RouteSegment> oldRoutes = routeRepository.findAllByTravelPlanId(travelPlanId);
         oldRoutes = oldRoutes.stream()
@@ -347,6 +385,29 @@ public class TravelItineraryPersistenceService {
         for (JsonNode route : routeNode) {
             routes.add(PendingRoute.fromJson(dayNumber, route));
         }
+    }
+
+    /**
+     * 최신 AI 응답은 각 일정 항목 안에 이전 장소에서 현재 장소까지의 경로를
+     * {@code route_from_previous}로 담는다. 기존 route_segments 형태와 동일한
+     * 내부 모델로 변환해 저장한다.
+     */
+    private void collectRouteFromPrevious(
+            int dayNumber,
+            JsonNode item,
+            int toSequence,
+            List<PendingRoute> routes
+    ) {
+        JsonNode routeNode = first(item, "route_from_previous", "routeFromPrevious");
+        if (routeNode == null || !routeNode.isObject() || toSequence <= 1) {
+            return;
+        }
+        ObjectNode normalized = ((ObjectNode) routeNode).deepCopy();
+        normalized.put("day_number", dayNumber);
+        normalized.put("from_sequence", toSequence - 1);
+        normalized.put("to_sequence", toSequence);
+        normalized.put("order", toSequence - 1);
+        routes.add(PendingRoute.fromJson(dayNumber, normalized));
     }
 
     private int nextPlaceOrder(Iterable<TravelPlanPlace> values) {
@@ -455,8 +516,18 @@ public class TravelItineraryPersistenceService {
         if (value == null) {
             return PlaceType.TOURISM;
         }
+        String normalized = value.trim().toUpperCase(Locale.ROOT);
+        return switch (normalized) {
+            case "RESTAURANT", "FOOD", "DINING", "음식", "음식점", "식당", "맛집" -> PlaceType.RESTAURANT;
+            case "ACCOMMODATION", "LODGING", "STAY", "HOTEL", "숙소", "숙박", "호텔" -> PlaceType.ACCOMMODATION;
+            case "TOUR", "TOURISM", "ATTRACTION", "관광", "관광지", "명소" -> PlaceType.TOURISM;
+            default -> parseInternalPlaceType(normalized);
+        };
+    }
+
+    private static PlaceType parseInternalPlaceType(String value) {
         try {
-            return PlaceType.valueOf(value.trim().toUpperCase(Locale.ROOT));
+            return PlaceType.valueOf(value);
         } catch (IllegalArgumentException ignored) {
             return PlaceType.TOURISM;
         }
@@ -511,11 +582,24 @@ public class TravelItineraryPersistenceService {
                 distance = km == null ? null : km * 1000;
             }
             Integer cost = integer(node, "cost", "fare", "fare_amount");
-            int order = positiveInt(first(node, "sort_order", "order", "sequence"), 1);
+            int order = positiveInt(first(node, "order"), 1);
+            JsonNode firstLeg = firstArrayElement(node, "legs");
+            String lineName = text(node, "line_name", "lineName", "line", "subway_line", "bus_number");
+            if (lineName == null) {
+                lineName = text(firstLeg, "line_name", "lineName", "line");
+            }
+            String vehicleNumber = text(node, "vehicle_number", "vehicleNumber", "bus_number", "vehicle");
+            if (vehicleNumber == null) {
+                vehicleNumber = text(firstLeg, "vehicle_number", "vehicleNumber", "bus_number", "vehicle");
+            }
+            String transport = text(node, "transport_type", "transportType", "mode");
+            if (transport == null) {
+                transport = text(firstLeg, "mode");
+            }
             TravelItineraryMetadataStore.RouteMetadata metadata = new TravelItineraryMetadataStore.RouteMetadata(
-                    text(node, "line_name", "lineName", "subway_line", "bus_number"),
-                    text(node, "vehicle_number", "vehicleNumber", "bus_number"),
-                    integer(node, "next_arrival_minutes", "nextArrivalMinutes"),
+                    lineName,
+                    vehicleNumber,
+                    integer(node, "next_arrival_minutes", "nextArrivalMinutes", "arrival_minutes", "arrivalMinutes"),
                     parseDateTime(first(node, "estimated_departure_at", "estimatedDepartureAt")),
                     parseDateTime(first(node, "estimated_arrival_at", "estimatedArrivalAt")),
                     false,
@@ -527,13 +611,18 @@ public class TravelItineraryPersistenceService {
                     toItemId,
                     fromSequence,
                     toSequence,
-                    parseTransport(text(node, "transport_type", "transportType", "mode")),
+                    parseTransport(transport),
                     duration,
                     distance,
                     cost,
                     order,
                     metadata
             );
+        }
+
+        private static JsonNode firstArrayElement(JsonNode node, String field) {
+            JsonNode values = first(node, field);
+            return values != null && values.isArray() && !values.isEmpty() ? values.get(0) : null;
         }
 
         private static Long longValue(JsonNode value) {

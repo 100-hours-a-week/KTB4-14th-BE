@@ -8,6 +8,7 @@ import com.audigo.domain.travel.entity.ItineraryItem;
 import com.audigo.domain.travel.entity.RouteSegment;
 import com.audigo.domain.travel.entity.TravelPlan;
 import com.audigo.domain.travel.entity.TravelPlanStatus;
+import com.audigo.domain.travel.entity.TravelTransportType;
 import com.audigo.domain.travel.dto.PlaceSearchItemResponse;
 import com.audigo.domain.travel.repository.ItineraryDayRepository;
 import com.audigo.domain.travel.repository.ItineraryItemRepository;
@@ -16,17 +17,19 @@ import com.audigo.domain.travel.repository.TravelPlanRepository;
 import com.audigo.global.error.BusinessException;
 import com.audigo.global.error.ErrorCode;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Function;
 import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @Transactional(readOnly = true)
 public class TravelItineraryService {
+
+    private static final Logger log = LoggerFactory.getLogger(TravelItineraryService.class);
 
     private final TravelPlanRepository travelPlanRepository;
     private final ItineraryDayRepository dayRepository;
@@ -80,6 +83,10 @@ public class TravelItineraryService {
         TravelPlan plan = item.getItineraryDay().getTravelPlan();
         if (plan.getStatus() != TravelPlanStatus.COMPLETED) {
             throw new BusinessException(ErrorCode.VALIDATION_FAILED);
+        }
+        // 같은 상태로 다시 요청해도 완료 시각을 바꾸거나 실시간 API를 중복 호출하지 않는다.
+        if (item.isCompleted() == completed) {
+            return new ItineraryCompletionResponse(item.getId(), item.isCompleted(), item.getCompletedAt());
         }
         LocalDateTime changedAt = completed ? LocalDateTime.now() : null;
         item.updateCompletion(completed, changedAt);
@@ -149,10 +156,18 @@ public class TravelItineraryService {
 
     private void refreshPublicRoutes(Long planId, ItineraryItem completedItem, LocalDateTime completedAt) {
         routeRepository.findAllByTravelPlanId(planId).stream()
-                .filter(route -> route.getTransportType().name().equals("PUBLIC_TRANSPORT"))
-                .filter(route -> route.getFromItineraryItem().getId().equals(completedItem.getId())
-                        || route.getToItineraryItem().getId().equals(completedItem.getId()))
-                .forEach(route -> realtimeService.refresh(route, completedAt));
+                .filter(route -> route.getTransportType() == TravelTransportType.PUBLIC_TRANSPORT)
+                .filter(route -> java.util.Objects.equals(route.getFromItineraryItem().getId(), completedItem.getId())
+                        || java.util.Objects.equals(route.getToItineraryItem().getId(), completedItem.getId()))
+                .forEach(route -> {
+                    try {
+                        realtimeService.refresh(route, completedAt);
+                    } catch (RuntimeException exception) {
+                        // 실시간 API 장애가 일정 완료 자체를 실패시키지 않도록 한 번 더 보호한다.
+                        log.warn("인접 대중교통 경로 갱신에 실패했지만 일정 완료는 유지합니다. routeId={}",
+                                route.getId(), exception);
+                    }
+                });
     }
 
     private TravelPlan ownedPlan(Long userId, Long travelPlanId) {

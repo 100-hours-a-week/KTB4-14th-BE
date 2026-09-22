@@ -1,8 +1,8 @@
 package com.audigo.domain.travel.dto;
 
-import com.audigo.domain.travel.entity.PlaceType;
 import com.audigo.domain.travel.entity.TravelPaceType;
 import com.audigo.domain.travel.entity.TravelTransportType;
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -44,7 +44,9 @@ public record AiTravelGenerationRequest(
             String address,
             BigDecimal latitude,
             BigDecimal longitude,
-            @JsonProperty("place_type") PlaceType placeType,
+            @JsonProperty("category")
+            @JsonAlias("place_type")
+            String category,
             Integer order
     ) {
     }

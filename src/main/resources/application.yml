@@ -42,3 +42,7 @@ audigo:
   kakao:
     map:
       rest-api-key: ${KAKAO_MAP_REST_API_KEY:}
+
+  ai:
+    base-url: ${AUDIGO_AI_BASE_URL:}
+    sse-path: ${AUDIGO_AI_SSE_PATH:/api/ai/v1/itinerary-jobs/stream}

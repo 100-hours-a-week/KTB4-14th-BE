@@ -21,6 +21,12 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class TravelGenerationJobService {
 
+    private static final List<TravelGenerationStage> REQUIRED_STAGES = List.of(
+            TravelGenerationStage.PLACE_RECOMMEND,
+            TravelGenerationStage.STAY_RECOMMEND,
+            TravelGenerationStage.ROUTE_OPTIMIZE
+    );
+
     private final TravelGenerationJobRepository jobRepository;
     private final TravelGenerationProgressStore progressStore;
     private final TravelItineraryPersistenceService itineraryPersistenceService;
@@ -76,6 +82,11 @@ public class TravelGenerationJobService {
         }
 
         ResolvedEvent resolved = resolveEvent(event);
+        if (resolved.kind() == EventKind.UNKNOWN && hasItineraryResult(event.data())) {
+            markResultStagesDone(jobId, event.data());
+            completeIfReady(job);
+            return;
+        }
         if (resolved.kind() == EventKind.HEARTBEAT || resolved.kind() == EventKind.UNKNOWN) {
             return;
         }
@@ -84,18 +95,18 @@ public class TravelGenerationJobService {
             return;
         }
         if (resolved.kind() == EventKind.COMPLETE) {
+            markResultStagesDone(jobId, event.data());
             completeIfReady(job);
             return;
         }
 
         TravelGenerationStage stage = resolved.stage();
-        if (resolved.state() == TravelGenerationStageState.RUNNING) {
-            progressStore.update(jobId, stage, TravelGenerationStageState.RUNNING, event.data());
-            return;
-        }
-
         if (!isStageOrderValid(jobId, stage)) {
             markFailed(job, "AI 생성 단계 순서가 올바르지 않습니다.");
+            return;
+        }
+        if (resolved.state() == TravelGenerationStageState.RUNNING) {
+            progressStore.update(jobId, stage, TravelGenerationStageState.RUNNING, event.data());
             return;
         }
         progressStore.update(jobId, stage, TravelGenerationStageState.DONE, event.data());
@@ -161,11 +172,7 @@ public class TravelGenerationJobService {
 
     private void completeIfReady(TravelGenerationJob job) {
         Map<TravelGenerationStage, TravelGenerationStageState> states = progressStore.states(job.getId());
-        boolean ready = List.of(
-                        TravelGenerationStage.PLACE_RECOMMEND,
-                        TravelGenerationStage.STAY_RECOMMEND,
-                        TravelGenerationStage.ROUTE_OPTIMIZE
-                ).stream()
+        boolean ready = REQUIRED_STAGES.stream()
                 .allMatch(stage -> states.get(stage) == TravelGenerationStageState.DONE);
         if (!ready) {
             return;
@@ -179,6 +186,42 @@ public class TravelGenerationJobService {
         jobRepository.save(job);
     }
 
+    /**
+     * 최신 AI 계약은 전체 일정 결과를 하나의 COMPLETE 이벤트 data로 보낼 수 있다.
+     * 이 경우 기존의 단계별 SSE 이벤트가 없어도 필수 생성 단계가 완료된 것으로 기록한다.
+     */
+    private void markResultStagesDone(Long jobId, String payload) {
+        if (!hasItineraryResult(payload)) {
+            return;
+        }
+        REQUIRED_STAGES.forEach(stage -> progressStore.update(
+                jobId,
+                stage,
+                TravelGenerationStageState.DONE,
+                payload
+        ));
+    }
+
+    private boolean hasItineraryResult(String payload) {
+        if (payload == null || payload.isBlank()) {
+            return false;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(payload);
+            if (root == null || !root.isObject()) {
+                return false;
+            }
+            JsonNode result = root.get("result");
+            if (result != null && result.isObject()) {
+                root = result;
+            }
+            JsonNode days = root.get("days");
+            return days != null && days.isArray() && !days.isEmpty();
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
     private void markFailed(TravelGenerationJob job, String message) {
         job.fail(message);
         job.getTravelPlan().markFailed();
@@ -189,7 +232,7 @@ public class TravelGenerationJobService {
 
     private TravelGenerationStage firstIncompleteStage(Long jobId) {
         Map<TravelGenerationStage, TravelGenerationStageState> states = progressStore.states(jobId);
-        for (TravelGenerationStage stage : TravelGenerationStage.values()) {
+        for (TravelGenerationStage stage : REQUIRED_STAGES) {
             if (states.get(stage) != TravelGenerationStageState.DONE) {
                 return stage;
             }

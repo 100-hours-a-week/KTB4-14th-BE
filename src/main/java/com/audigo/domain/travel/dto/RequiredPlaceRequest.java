@@ -2,6 +2,7 @@ package com.audigo.domain.travel.dto;
 
 import com.audigo.domain.travel.entity.PlaceProvider;
 import com.audigo.domain.travel.entity.PlaceType;
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.DecimalMax;
@@ -38,6 +39,7 @@ public record RequiredPlaceRequest(
         BigDecimal longitude,
 
         @JsonProperty("place_type")
+        @JsonAlias("category")
         PlaceType placeType,
 
         @Min(value = 1, message = "장소 순서는 1 이상이어야 합니다.")
