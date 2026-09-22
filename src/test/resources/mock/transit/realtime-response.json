@@ -1,0 +1,7 @@
+{
+  "line_name": "간선버스",
+  "bus_number": "701",
+  "next_arrival_minutes": 3,
+  "estimated_departure_at": "2026-09-24T12:00:00",
+  "estimated_arrival_at": "2026-09-24T12:35:00"
+}
