@@ -2,6 +2,7 @@ package com.audigo.domain.travel.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -73,19 +74,42 @@ class TravelGenerationJobServiceTest {
     }
 
     @Test
-    void 장소_숙소_경로_순서가_맞으면_일정을_저장하고_완료한다() {
-        when(persistenceService.persistIfPresent(job)).thenReturn(true);
+    void 단계_이벤트_뒤_COMPLETE가_도착하면_일정을_저장하고_완료한다() {
+        when(persistenceService.persistIfPresent(job)).thenReturn(false, true);
 
         service.handleEvent(1L, new AiGenerationEvent("PLACE_RECOMMEND_DONE", "{}"));
         service.handleEvent(1L, new AiGenerationEvent("STAY_RECOMMEND_DONE", "{}"));
         service.handleEvent(1L, new AiGenerationEvent(
                 "ROUTE_OPTIMIZE_DONE",
-                "{\"result\":{\"route_segments\":[]}}"
+                "{}"
         ));
 
-        verify(persistenceService).persistIfPresent(job);
+        verify(job, never()).fail(anyString());
+        verify(job, never()).complete();
+
+        service.handleEvent(1L, new AiGenerationEvent(
+                "COMPLETE",
+                "{\"days\":[{\"day_number\":1,\"items\":[]}]}"
+        ));
+
+        verify(persistenceService, org.mockito.Mockito.times(2)).persistIfPresent(job);
         verify(job).complete();
         verify(plan).markCompleted();
+        verify(jobRepository).save(job);
+    }
+
+    @Test
+    void COMPLETE없이_스트림이_종료되면_여행을_실패시킨다() {
+        service.handleEvent(1L, new AiGenerationEvent("PLACE_RECOMMEND_DONE", "{}"));
+        service.handleEvent(1L, new AiGenerationEvent("STAY_RECOMMEND_DONE", "{}"));
+        service.handleEvent(1L, new AiGenerationEvent("ROUTE_OPTIMIZE_DONE", "{}"));
+
+        verify(job, never()).fail(anyString());
+
+        service.finishStream(1L);
+
+        verify(job).fail("AI 서버가 여행 생성 결과를 모두 보내지 않았습니다.");
+        verify(plan).markFailed();
         verify(jobRepository).save(job);
     }
 

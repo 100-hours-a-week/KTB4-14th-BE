@@ -178,7 +178,8 @@ public class TravelGenerationJobService {
             return;
         }
         if (!itineraryPersistenceService.persistIfPresent(job)) {
-            markFailed(job, "AI 서버가 일정 결과를 보내지 않았습니다.");
+            // 단계 이벤트가 모두 도착해도 최종 COMPLETE 이벤트가 아직 오지 않았을 수 있다.
+            // 스트림이 실제로 종료된 경우의 실패 처리는 finishStream()에서 담당한다.
             return;
         }
         job.complete();
