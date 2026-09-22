@@ -40,7 +40,7 @@ import java.util.Set;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-/** AI 결과의 날짜·장소·경로를 여행 도메인 테이블로 변환한다. */
+// AI 결과의 날짜·장소·경로를 여행 도메인 테이블로 변환
 @Service
 public class TravelItineraryPersistenceService {
 
@@ -73,10 +73,7 @@ public class TravelItineraryPersistenceService {
         this.metadataStore = metadataStore;
     }
 
-    /**
-     * SSE 단계 payload의 일정·경로 결과를 저장한다.
-     * 축약 결과에는 필수 장소 fallback을 적용하고, 일정과 연결할 수 없는 결과는 저장하지 않는다.
-     */
+    // SSE 단계 payload의 일정·경로 결과를 저장한다.축약 결과에는 필수 장소 fallback을 적용하고, 일정과 연결할 수 없는 결과는 저장하지 않는다.
     @Transactional
     public boolean persistIfPresent(TravelGenerationJob job) {
         TravelPlan plan = job.getTravelPlan();

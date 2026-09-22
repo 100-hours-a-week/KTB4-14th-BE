@@ -6,10 +6,8 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.stereotype.Component;
 
-/**
- * 장소 이름·주소·좌표와 대중교통 부가 정보처럼 DB에 저장하지 않는 결과 메타데이터를 보관한다.
- * 서버 재시작 뒤에는 비워지므로, 그 경우 응답에는 영속화된 provider 식별자만 남는다.
- */
+// 장소 이름·주소·좌표와 대중교통 부가 정보처럼 DB에 저장하지 않는 결과 메타데이터를 보관
+// 서버 재시작 뒤에는 비워지므로, 그 경우 응답에는 영속화된 provider 식별자만 남음
 @Component
 public class TravelItineraryMetadataStore {
 

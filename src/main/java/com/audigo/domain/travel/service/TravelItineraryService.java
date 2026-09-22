@@ -84,7 +84,7 @@ public class TravelItineraryService {
         if (plan.getStatus() != TravelPlanStatus.COMPLETED) {
             throw new BusinessException(ErrorCode.VALIDATION_FAILED);
         }
-        // 같은 상태로 다시 요청해도 완료 시각을 바꾸거나 실시간 API를 중복 호출하지 않는다.
+        // 같은 상태로 다시 요청해도 완료 시각을 바꾸거나 실시간 API를 중복 호출하지 않는다
         if (item.isCompleted() == completed) {
             return new ItineraryCompletionResponse(item.getId(), item.isCompleted(), item.getCompletedAt());
         }
@@ -102,7 +102,7 @@ public class TravelItineraryService {
         if (plan.getStatus() != TravelPlanStatus.COMPLETED) {
             throw new BusinessException(ErrorCode.VALIDATION_FAILED);
         }
-        // V1에서는 AI가 계산해 저장한 1차 경로를 유지하고, 완료 시 대중교통만 실시간 보강한다.
+        // V1에서는 AI가 계산해 저장한 1차 경로를 유지하고, 완료 시 대중교통만 실시간 업데이트 처리
         List<RouteSegment> routes = routeRepository.findAllByTravelPlanId(travelPlanId).stream()
                 .sorted(java.util.Comparator.comparingInt(RouteSegment::getOrder))
                 .toList();
@@ -163,7 +163,7 @@ public class TravelItineraryService {
                     try {
                         realtimeService.refresh(route, completedAt);
                     } catch (RuntimeException exception) {
-                        // 실시간 API 장애가 일정 완료 자체를 실패시키지 않도록 한 번 더 보호한다.
+                        // 실시간 API 장애가 일정 완료 자체를 실패시키지 않도록 한 번 더 보호
                         log.warn("인접 대중교통 경로 갱신에 실패했지만 일정 완료는 유지합니다. routeId={}",
                                 route.getId(), exception);
                     }

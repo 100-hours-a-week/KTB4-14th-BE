@@ -178,8 +178,8 @@ public class TravelGenerationJobService {
             return;
         }
         if (!itineraryPersistenceService.persistIfPresent(job)) {
-            // 단계 이벤트가 모두 도착해도 최종 COMPLETE 이벤트가 아직 오지 않았을 수 있다.
-            // 스트림이 실제로 종료된 경우의 실패 처리는 finishStream()에서 담당한다.
+            // 단계 이벤트가 모두 도착해도 최종 COMPLETE 이벤트가 안 올수있다
+            // 스트림이 실제로 종료된 경우의 실패 처리는 finishStream()에서 담당
             return;
         }
         job.complete();
@@ -187,10 +187,6 @@ public class TravelGenerationJobService {
         jobRepository.save(job);
     }
 
-    /**
-     * 최신 AI 계약은 전체 일정 결과를 하나의 COMPLETE 이벤트 data로 보낼 수 있다.
-     * 이 경우 기존의 단계별 SSE 이벤트가 없어도 필수 생성 단계가 완료된 것으로 기록한다.
-     */
     private void markResultStagesDone(Long jobId, String payload) {
         if (!hasItineraryResult(payload)) {
             return;

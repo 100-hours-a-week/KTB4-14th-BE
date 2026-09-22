@@ -15,12 +15,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.util.UriComponentsBuilder;
 
-/**
- * 대중교통 도착 정보 어댑터.
- *
- * <p>실시간 정보는 메타데이터 저장소에만 보관한다. 외부 API가 실패해도
- * AI가 계산한 최초 경로 정보가 사라지지 않도록 기존 값을 그대로 유지한다.</p>
- */
 @Service
 public class PublicTransportRealtimeService {
 
