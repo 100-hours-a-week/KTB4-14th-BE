@@ -105,6 +105,10 @@ public class NotificationService {
 
     @Transactional
     public NotificationCreateResult create(CreateNotificationCommand command) {
+        if (command == null) {
+            log.warn("notification_command_invalid field=command reason=null");
+            throw new BusinessException(ErrorCode.INVALID_NOTIFICATION_REQUEST);
+        }
         User user = findActiveUser(command.userId());
         NotificationSetting setting = findOrCreateSettings(user.id());
         if (!setting.enabledFor(command.notificationType())) {

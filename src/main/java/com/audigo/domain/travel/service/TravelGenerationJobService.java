@@ -1,5 +1,6 @@
 package com.audigo.domain.travel.service;
 
+import com.audigo.domain.notification.service.NotificationService;
 import com.audigo.domain.travel.dto.TravelGenerationStatusResponse;
 import com.audigo.domain.travel.entity.TravelGenerationJob;
 import com.audigo.domain.travel.entity.TravelGenerationStage;
@@ -11,15 +12,21 @@ import com.audigo.global.error.BusinessException;
 import com.audigo.global.error.ErrorCode;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.Locale;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class TravelGenerationJobService {
+
+    private static final Logger log = LoggerFactory.getLogger(TravelGenerationJobService.class);
 
     private static final List<TravelGenerationStage> REQUIRED_STAGES = List.of(
             TravelGenerationStage.PLACE_RECOMMEND,
@@ -30,17 +37,20 @@ public class TravelGenerationJobService {
     private final TravelGenerationJobRepository jobRepository;
     private final TravelGenerationProgressStore progressStore;
     private final TravelItineraryPersistenceService itineraryPersistenceService;
+    private final NotificationService notificationService;
     private final ObjectMapper objectMapper;
 
     public TravelGenerationJobService(
             TravelGenerationJobRepository jobRepository,
             TravelGenerationProgressStore progressStore,
             TravelItineraryPersistenceService itineraryPersistenceService,
+            NotificationService notificationService,
             ObjectMapper objectMapper
     ) {
         this.jobRepository = jobRepository;
         this.progressStore = progressStore;
         this.itineraryPersistenceService = itineraryPersistenceService;
+        this.notificationService = notificationService;
         this.objectMapper = objectMapper;
     }
 
@@ -82,6 +92,14 @@ public class TravelGenerationJobService {
         }
 
         ResolvedEvent resolved = resolveEvent(event);
+        log.info(
+                "travel_generation_event job_id={} event_type={} kind={} stage={} state={}",
+                jobId,
+                event.normalizedType(),
+                resolved.kind(),
+                resolved.stage(),
+                resolved.state()
+        );
         if (resolved.kind() == EventKind.UNKNOWN && hasItineraryResult(event.data())) {
             markResultStagesDone(jobId, event.data());
             completeIfReady(job);
@@ -91,7 +109,7 @@ public class TravelGenerationJobService {
             return;
         }
         if (resolved.kind() == EventKind.FAILURE) {
-            markFailed(job, "AI 서버가 여행 생성에 실패했습니다.");
+            markFailed(job, failureMessage(event.data()));
             return;
         }
         if (resolved.kind() == EventKind.COMPLETE) {
@@ -136,10 +154,34 @@ public class TravelGenerationJobService {
     @Transactional
     public void markFailed(Long jobId, String message) {
         TravelGenerationJob job = getJob(jobId);
-        if (job.getStatus() == TravelPlanStatus.COMPLETED) {
+        if (job.getStatus() != TravelPlanStatus.GENERATING) {
             return;
         }
         markFailed(job, message);
+    }
+
+    @Transactional
+    public int failStaleGeneratingJobs(Duration timeout) {
+        if (timeout == null || timeout.isNegative() || timeout.isZero()) {
+            return 0;
+        }
+        LocalDateTime cutoff = LocalDateTime.now().minus(timeout);
+        List<TravelGenerationJob> jobs = jobRepository.findByStatusAndStartedAtBefore(
+                TravelPlanStatus.GENERATING,
+                cutoff
+        );
+        jobs.forEach(job -> markFailed(
+                job,
+                "AI 서버 응답이 지연되어 여행 일정 생성에 실패했습니다."
+        ));
+        if (!jobs.isEmpty()) {
+            log.warn(
+                    "travel_generation_stale_jobs_failed count={} timeout_seconds={}",
+                    jobs.size(),
+                    timeout.toSeconds()
+            );
+        }
+        return jobs.size();
     }
 
     @Transactional(readOnly = true)
@@ -183,8 +225,19 @@ public class TravelGenerationJobService {
             return;
         }
         job.complete();
-        job.getTravelPlan().markCompleted();
+        TravelPlan travelPlan = job.getTravelPlan();
+        travelPlan.markCompleted();
         jobRepository.save(job);
+        log.info(
+                "travel_generation_completed job_id={} travel_plan_id={}",
+                job.getId(),
+                travelPlan.getId()
+        );
+        notificationService.notifyTravelComplete(
+                travelPlan.getUserId(),
+                travelPlan.getId(),
+                travelPlan.getRegion().getFullName() + " 여행 일정이 완성됐어요."
+        );
     }
 
     private void markResultStagesDone(Long jobId, String payload) {
@@ -220,11 +273,26 @@ public class TravelGenerationJobService {
     }
 
     private void markFailed(TravelGenerationJob job, String message) {
+        if (job.getStatus() != TravelPlanStatus.GENERATING) {
+            return;
+        }
         job.fail(message);
-        job.getTravelPlan().markFailed();
+        TravelPlan travelPlan = job.getTravelPlan();
+        travelPlan.markFailed();
         progressStore.update(job.getId(), firstIncompleteStage(job.getId()),
                 TravelGenerationStageState.FAILED, null);
         jobRepository.save(job);
+        log.warn(
+                "travel_generation_failed job_id={} travel_plan_id={} reason={}",
+                job.getId(),
+                travelPlan.getId(),
+                message
+        );
+        notificationService.notifyTravelFailed(
+                travelPlan.getUserId(),
+                travelPlan.getId(),
+                message == null || message.isBlank() ? "여행 일정 생성에 실패했습니다." : message
+        );
     }
 
     private TravelGenerationStage firstIncompleteStage(Long jobId) {
@@ -235,6 +303,27 @@ public class TravelGenerationJobService {
             }
         }
         return TravelGenerationStage.ROUTE_OPTIMIZE;
+    }
+
+    private String failureMessage(String payload) {
+        String fallback = "AI 서버가 여행 생성에 실패했습니다.";
+        if (payload == null || payload.isBlank()) {
+            return fallback;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(payload);
+            JsonNode data = root.path("data");
+            JsonNode errorMessage = data.path("error_message");
+            if (errorMessage.isTextual() && !errorMessage.asText().isBlank()) {
+                return errorMessage.asText();
+            }
+            JsonNode message = root.path("message");
+            if (message.isTextual() && !message.asText().isBlank()) {
+                return message.asText();
+            }
+        } catch (Exception ignored) {
+        }
+        return fallback;
     }
 
     private ResolvedEvent resolveEvent(AiGenerationEvent event) {

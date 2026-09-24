@@ -1,11 +1,16 @@
 package com.audigo.domain.travel.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import com.audigo.domain.travel.config.AiServerProperties;
 import com.audigo.domain.travel.dto.AiTravelGenerationRequest;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -22,14 +27,24 @@ class AiSseGenerationClientTest {
         RestClient.Builder builder = RestClient.builder();
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
         server.expect(requestTo("http://ai.test/api/ai/v1/itinerary-jobs/stream"))
+                .andExpect(header("Authorization", "Bearer test-ai-token-value-that-is-long-enough"))
+                .andExpect(content().string(containsString("\"place_type\"")))
+                .andExpect(content().string(not(containsString("\"category\""))))
                 .andRespond(withSuccess(
                         getClass().getResourceAsStream("/mock/ai/itinerary-stream.sse")
                                 .readAllBytes(),
                         MediaType.TEXT_EVENT_STREAM));
 
         AiSseGenerationClient client = new AiSseGenerationClient(
-                builder,
-                new AiServerProperties("http://ai.test", "/api/ai/v1/itinerary-jobs/stream")
+                builder.build(),
+                new AiServerProperties(
+                        "http://ai.test",
+                        "/api/ai/v1/itinerary-jobs/stream",
+                        "test-ai-token-value-that-is-long-enough",
+                        5,
+                        330,
+                        300
+                )
         );
         List<AiGenerationEvent> events = new ArrayList<>();
 
@@ -57,7 +72,16 @@ class AiSseGenerationClientTest {
                 1,
                 "SOLO",
                 null,
-                List.of()
+                List.of(new AiTravelGenerationRequest.PlaceContext(
+                        "KAKAO",
+                        "place-1",
+                        "테스트 장소",
+                        "서울시 중구",
+                        BigDecimal.valueOf(37.5665),
+                        BigDecimal.valueOf(126.9780),
+                        "TOURISM",
+                        1
+                ))
         );
     }
 }

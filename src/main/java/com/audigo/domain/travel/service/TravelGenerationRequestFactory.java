@@ -72,7 +72,7 @@ public class TravelGenerationRequestFactory {
                         null,
                         null,
                         null,
-                        aiCategory(place.getPlaceType()),
+                        aiPlaceType(place.getPlaceType()),
                         place.getPlaceOrder()
                 ))
                 .toList();
@@ -97,12 +97,12 @@ public class TravelGenerationRequestFactory {
                 place.address(),
                 place.latitude(),
                 place.longitude(),
-                aiCategory(place.placeType()),
+                aiPlaceType(place.placeType()),
                 place.order()
         );
     }
 
-    private String aiCategory(PlaceType placeType) {
+    private String aiPlaceType(PlaceType placeType) {
         return placeType == null ? PlaceType.TOURISM.name() : placeType.name();
     }
 }

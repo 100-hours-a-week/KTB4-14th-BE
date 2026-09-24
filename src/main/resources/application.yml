@@ -10,12 +10,16 @@ spring:
     password: ${DB_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
   jpa:
+    defer-datasource-initialization: true
     hibernate:
       ddl-auto: ${JPA_DDL_AUTO:create}
     open-in-view: false
     properties:
       hibernate:
         format_sql: true
+  sql:
+    init:
+      mode: always
   jackson:
     property-naming-strategy: SNAKE_CASE
 
@@ -52,3 +56,7 @@ audigo:
   ai:
     base-url: ${AUDIGO_AI_BASE_URL:}
     sse-path: ${AUDIGO_AI_SSE_PATH:/api/ai/v1/itinerary-jobs/stream}
+    api-token: ${AUDIGO_API_TOKEN:}
+    connect-timeout-seconds: ${AUDIGO_AI_CONNECT_TIMEOUT_SECONDS:5}
+    read-timeout-seconds: ${AUDIGO_AI_READ_TIMEOUT_SECONDS:330}
+    job-timeout-seconds: ${AUDIGO_AI_JOB_TIMEOUT_SECONDS:300}
