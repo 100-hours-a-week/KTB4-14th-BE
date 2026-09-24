@@ -17,6 +17,7 @@ public enum ErrorCode {
     USER_NOT_FOUND(HttpStatus.NOT_FOUND, "user_not_found"),
     REGION_NOT_FOUND(HttpStatus.NOT_FOUND, "region_not_found"),
     NOTIFICATION_NOT_FOUND(HttpStatus.NOT_FOUND, "notification_not_found"),
+    INVALID_NOTIFICATION_REQUEST(HttpStatus.BAD_REQUEST, "invalid_notification_request"),
     DUPLICATED_REQUIRED_PLACE(HttpStatus.CONFLICT, "duplicated_required_place"),
     VALIDATION_FAILED(HttpStatus.UNPROCESSABLE_ENTITY, "validation_failed"),
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "internal_server_error"),

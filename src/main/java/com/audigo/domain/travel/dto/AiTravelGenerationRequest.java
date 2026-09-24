@@ -44,9 +44,9 @@ public record AiTravelGenerationRequest(
             String address,
             BigDecimal latitude,
             BigDecimal longitude,
-            @JsonProperty("category")
-            @JsonAlias("place_type")
-            String category,
+            @JsonProperty("place_type")
+            @JsonAlias("category")
+            String placeType,
             Integer order
     ) {
     }

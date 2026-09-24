@@ -11,7 +11,15 @@ public record MyPageResponse(
         long completedTravelCount,
         long upcomingTravelCount
 ) {
-    public static MyPageResponse from(User user) {
-        return new MyPageResponse(user.id(), user.nickname(), user.profileImageUrl(), "KAKAO", user.status(), 0, 0);
+    public static MyPageResponse from(User user, long completedTravelCount, long upcomingTravelCount) {
+        return new MyPageResponse(
+                user.id(),
+                user.nickname(),
+                user.profileImageUrl(),
+                "KAKAO",
+                user.status(),
+                completedTravelCount,
+                upcomingTravelCount
+        );
     }
 }

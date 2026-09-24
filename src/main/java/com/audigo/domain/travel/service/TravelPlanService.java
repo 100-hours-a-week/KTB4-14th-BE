@@ -3,6 +3,7 @@ package com.audigo.domain.travel.service;
 import com.audigo.domain.travel.dto.RegionResponse;
 import com.audigo.domain.travel.dto.RequiredPlaceRequest;
 import com.audigo.domain.travel.dto.TravelPlanRequest;
+import com.audigo.domain.travel.dto.TravelSummaryResponse;
 import com.audigo.domain.travel.dto.TravelPreferenceRequest;
 import com.audigo.domain.travel.entity.FoodType;
 import com.audigo.domain.travel.entity.Place;
@@ -11,6 +12,7 @@ import com.audigo.domain.travel.entity.TravelPlaceSource;
 import com.audigo.domain.travel.entity.TravelPlanPlace;
 import com.audigo.domain.travel.entity.Region;
 import com.audigo.domain.travel.entity.TravelPlan;
+import com.audigo.domain.travel.entity.TravelPlanStatus;
 import com.audigo.domain.travel.entity.TravelPreference;
 import com.audigo.domain.travel.entity.TravelThemeType;
 import com.audigo.domain.travel.repository.RegionRepository;
@@ -52,6 +54,38 @@ public class TravelPlanService {
     public List<RegionResponse> getRegions() {
         return regionRepository.findAllByOrderByFullNameAsc().stream()
                 .map(RegionResponse::from)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public TravelSummaryResponse getUpcomingTravel(Long userId) {
+        return travelPlanRepository
+                .findTopByUserIdAndStatusAndDepartureDatetimeGreaterThanEqualOrderByArrivalDatetimeAsc(
+                        userId,
+                        TravelPlanStatus.COMPLETED,
+                        LocalDateTime.now()
+                )
+                .map(TravelSummaryResponse::from)
+                .orElse(null);
+    }
+
+    @Transactional(readOnly = true)
+    public List<TravelSummaryResponse> getRecentTravels(Long userId) {
+        return travelPlanRepository
+                .findTop5ByUserIdAndStatusAndDepartureDatetimeLessThanOrderByDepartureDatetimeDesc(
+                        userId,
+                        TravelPlanStatus.COMPLETED,
+                        LocalDateTime.now()
+                )
+                .stream()
+                .map(TravelSummaryResponse::from)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<TravelSummaryResponse> getMyTravels(Long userId) {
+        return travelPlanRepository.findAllByUserIdOrderByCreatedAtDesc(userId).stream()
+                .map(TravelSummaryResponse::from)
                 .toList();
     }
 

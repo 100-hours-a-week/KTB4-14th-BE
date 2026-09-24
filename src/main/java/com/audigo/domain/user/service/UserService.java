@@ -1,11 +1,14 @@
 package com.audigo.domain.user.service;
 
+import com.audigo.domain.travel.entity.TravelPlanStatus;
+import com.audigo.domain.travel.repository.TravelPlanRepository;
 import com.audigo.domain.user.dto.MyPageResponse;
 import com.audigo.domain.user.dto.UpdateNicknameResponse;
 import com.audigo.domain.user.entity.User;
 import com.audigo.domain.user.repository.UserRepository;
 import com.audigo.global.error.BusinessException;
 import com.audigo.global.error.ErrorCode;
+import java.time.LocalDateTime;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -13,14 +16,28 @@ import org.springframework.transaction.annotation.Transactional;
 public class UserService {
 
     private final UserRepository userRepository;
+    private final TravelPlanRepository travelPlanRepository;
 
-    public UserService(UserRepository userRepository) {
+    public UserService(UserRepository userRepository, TravelPlanRepository travelPlanRepository) {
         this.userRepository = userRepository;
+        this.travelPlanRepository = travelPlanRepository;
     }
 
     @Transactional(readOnly = true)
     public MyPageResponse getMyPage(Long userId) {
-        return MyPageResponse.from(findUser(userId));
+        User user = findUser(userId);
+        LocalDateTime now = LocalDateTime.now();
+        long completedTravelCount = travelPlanRepository.countByUserIdAndStatusAndDepartureDatetimeLessThan(
+                userId,
+                TravelPlanStatus.COMPLETED,
+                now
+        );
+        long upcomingTravelCount = travelPlanRepository.countByUserIdAndStatusAndDepartureDatetimeGreaterThanEqual(
+                userId,
+                TravelPlanStatus.COMPLETED,
+                now
+        );
+        return MyPageResponse.from(user, completedTravelCount, upcomingTravelCount);
     }
 
     @Transactional

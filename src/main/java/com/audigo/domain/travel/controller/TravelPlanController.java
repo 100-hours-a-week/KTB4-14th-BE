@@ -2,6 +2,7 @@ package com.audigo.domain.travel.controller;
 
 import com.audigo.domain.travel.dto.TravelPlanCreatedResponse;
 import com.audigo.domain.travel.dto.TravelPlanRequest;
+import com.audigo.domain.travel.dto.TravelSummaryResponse;
 import com.audigo.domain.travel.entity.TravelPlan;
 import com.audigo.domain.travel.service.TravelPlanService;
 import com.audigo.domain.travel.service.TravelGenerationOrchestrator;
@@ -9,6 +10,7 @@ import com.audigo.domain.travel.dto.TravelGenerationStatusResponse;
 import com.audigo.global.response.ApiResponse;
 import com.audigo.global.security.CurrentUser;
 import jakarta.validation.Valid;
+import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -46,6 +48,30 @@ public class TravelPlanController {
         return ApiResponse.of(
                 "여행 생성 요청",
                 TravelPlanCreatedResponse.from(travelPlan, generationJobId)
+        );
+    }
+
+    @GetMapping("/upcoming")
+    public ApiResponse<TravelSummaryResponse> getUpcomingTravel() {
+        return ApiResponse.of(
+                "upcoming_travel_found",
+                travelPlanService.getUpcomingTravel(currentUser.id())
+        );
+    }
+
+    @GetMapping("/recent")
+    public ApiResponse<List<TravelSummaryResponse>> getRecentTravels() {
+        return ApiResponse.of(
+                "recent_travels_found",
+                travelPlanService.getRecentTravels(currentUser.id())
+        );
+    }
+
+    @GetMapping("/me")
+    public ApiResponse<List<TravelSummaryResponse>> getMyTravels() {
+        return ApiResponse.of(
+                "my_travels_found",
+                travelPlanService.getMyTravels(currentUser.id())
         );
     }
 
