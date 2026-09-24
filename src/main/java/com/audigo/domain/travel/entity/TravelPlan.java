@@ -1,0 +1,201 @@
+package com.audigo.domain.travel.entity;
+
+import jakarta.persistence.*;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+@Entity
+@Table(name = "travel_plans")
+
+public class TravelPlan {
+
+    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(name = "user_id", nullable = false)
+    private Long userId;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "region_id", nullable = false)
+    private Region region;
+
+    @Column(name = "arrival_datetime", nullable = false)
+    private LocalDateTime arrivalDatetime;
+
+    @Column(name = "departure_datetime", nullable = false)
+    private LocalDateTime departureDatetime;
+
+    @Column(name = "headcount", nullable = false)
+    private int headCount;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "companion_type", nullable = false, length = 20)
+    private CompanionType companionType;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false, length = 30)
+    private TravelPlanStatus status;
+
+    @OneToOne(mappedBy = "travelPlan", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+    private TravelPreference preference;
+
+    @OneToMany(mappedBy = "travelPlan", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("placeOrder ASC")
+    private List<TravelPlanPlace> requiredPlaces = new ArrayList<>();
+
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private LocalDateTime createdAt;
+
+    @Column(name = "updated_at", nullable = false)
+    private LocalDateTime updatedAt;
+
+    @PrePersist
+    protected void onCreate(){
+        LocalDateTime now = LocalDateTime.now();
+
+        this.createdAt = now;
+        this.updatedAt = now;
+    }
+    @PreUpdate
+    protected void onUpdate(){
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    protected TravelPlan(){}
+
+    private TravelPlan(Long userId, Region region, LocalDateTime arrivalDatetime,
+                       LocalDateTime departureDatetime, int headCount, CompanionType companionType){
+        if (userId == null){
+            throw new IllegalArgumentException("사용자 ID는 필수입니다.");
+        }
+        if (region == null){
+            throw new IllegalArgumentException("지역 ID는 필수입니다.");
+        }
+        if (arrivalDatetime == null){
+            throw new IllegalArgumentException("도착 시간은 필수입니다.");
+        }
+        if (departureDatetime == null){
+            throw new IllegalArgumentException("출발 시간은 필수입니다.");
+        }
+        if (companionType == null) {
+            throw new IllegalArgumentException("동행자 유형은 필수입니다.");
+        }
+        if (headCount < 1 || headCount > 30){
+            throw new IllegalArgumentException("인원은 1명 이상 30명 이하여야 합니다.");
+        }
+        if (!arrivalDatetime.isBefore(departureDatetime)){
+            throw new IllegalArgumentException("도착 시간은 출발 시간보다 빨라야 합니다");
+        }
+        if (companionType == CompanionType.SOLO && headCount != 1) {
+            throw new IllegalArgumentException("혼자 여행의 인원은 1명이어야 합니다.");
+        }
+        if (companionType != CompanionType.SOLO && headCount < 2) {
+            throw new IllegalArgumentException("동행 여행의 인원은 2명 이상이어야 합니다.");
+        }
+
+        this.userId = userId;
+        this.region = region;
+        this.arrivalDatetime = arrivalDatetime;
+        this.departureDatetime = departureDatetime;
+        this.headCount = headCount;
+        this.companionType = companionType;
+        this.status = TravelPlanStatus.GENERATING;
+    }
+
+    public static TravelPlan create(
+            Long userId,
+            Region region,
+            LocalDateTime arrivalDatetime,
+            LocalDateTime departureDatetime,
+            int headCount,
+            CompanionType companionType) {
+        return new TravelPlan(userId,
+                region,
+                arrivalDatetime,
+                departureDatetime,
+                headCount,
+                companionType);
+    }
+
+    public void attachPreference(TravelPreference preference) {
+        if (this.preference != null) {
+            throw new IllegalStateException("여행 취향은 한 번만 설정할 수 있습니다.");
+        }
+        this.preference = java.util.Objects.requireNonNull(preference, "여행 취향은 필수입니다.");
+    }
+
+    public void addRequiredPlace(TravelPlanPlace requiredPlace) {
+        TravelPlanPlace value = java.util.Objects.requireNonNull(requiredPlace, "필수 장소는 필수입니다.");
+        boolean duplicated = requiredPlaces.stream()
+                .map(TravelPlanPlace::getPlace)
+                .anyMatch(place -> place.getProvider() == value.getPlace().getProvider()
+                        && place.getProviderPlaceId().equals(value.getPlace().getProviderPlaceId()));
+        if (duplicated) {
+            throw new IllegalArgumentException("필수 장소는 중복 등록할 수 없습니다.");
+        }
+        this.requiredPlaces.add(value);
+    }
+
+    // getter
+    public Long getId() {
+        return id;
+    }
+
+    public Long getUserId(){
+        return userId;
+    }
+
+    public Region getRegion(){
+        return region;
+    }
+
+    public LocalDateTime getArrivalDatetime(){
+        return arrivalDatetime;
+    }
+
+    public LocalDateTime getDepartureDatetime(){
+        return departureDatetime;
+    }
+
+    public int getHeadCount(){
+        return headCount;
+    }
+
+    public CompanionType getCompanionType(){
+        return companionType;
+    }
+
+    public TravelPlanStatus getStatus(){
+        return status;
+    }
+
+    public void markCompleted() {
+        this.status = TravelPlanStatus.COMPLETED;
+    }
+
+    public void markFailed() {
+        this.status = TravelPlanStatus.FAILED;
+    }
+
+    public void restartGeneration() {
+        this.status = TravelPlanStatus.GENERATING;
+    }
+
+    public TravelPreference getPreference() {
+        return preference;
+    }
+
+    public List<TravelPlanPlace> getRequiredPlaces() {
+        return Collections.unmodifiableList(requiredPlaces);
+    }
+
+    public LocalDateTime getCreatedAt(){
+        return createdAt;
+    }
+
+    public LocalDateTime getUpdatedAt(){
+        return updatedAt;
+    }
+}

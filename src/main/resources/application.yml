@@ -5,17 +5,21 @@ spring:
   application:
     name: audigo-be
   datasource:
-    url: jdbc:mysql://127.0.0.1:3306/audigo?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
+    url: ${SPRING_DATASOURCE_URL}
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
   jpa:
+    defer-datasource-initialization: true
     hibernate:
       ddl-auto: ${JPA_DDL_AUTO:create}
     open-in-view: false
     properties:
       hibernate:
         format_sql: true
+  sql:
+    init:
+      mode: always
   jackson:
     property-naming-strategy: SNAKE_CASE
 
@@ -44,3 +48,15 @@ audigo:
       client-id: ${KAKAO_REST_API_KEY:}
       client-secret: ${KAKAO_CLIENT_SECRET:}
       redirect-uri: ${KAKAO_REDIRECT_URI:http://localhost:5173/auth/kakao}
+
+  kakao:
+    map:
+      rest-api-key: ${KAKAO_MAP_REST_API_KEY:}
+
+  ai:
+    base-url: ${AUDIGO_AI_BASE_URL:}
+    sse-path: ${AUDIGO_AI_SSE_PATH:/api/ai/v1/itinerary-jobs/stream}
+    api-token: ${AUDIGO_API_TOKEN:}
+    connect-timeout-seconds: ${AUDIGO_AI_CONNECT_TIMEOUT_SECONDS:5}
+    read-timeout-seconds: ${AUDIGO_AI_READ_TIMEOUT_SECONDS:330}
+    job-timeout-seconds: ${AUDIGO_AI_JOB_TIMEOUT_SECONDS:300}

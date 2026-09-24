@@ -1,0 +1,11 @@
+event: PLACE_RECOMMEND_DONE
+data: {}
+
+event: STAY_RECOMMEND_DONE
+data: {}
+
+event: ROUTE_OPTIMIZE_DONE
+data: {}
+
+event: COMPLETE
+data: {"generation_job_id":1,"travel_plan_id":1,"region":{"region_id":1,"full_name":"서울특별시"},"duration":{"arrival_datetime":"2026-09-24T10:00:00","departure_datetime":"2026-09-26T18:00:00"},"headcount":1,"companion_type":"SOLO","preference":{"pace_type":"BALANCED","transport_type":"PUBLIC_TRANSPORT","budget_min":100000,"budget_max":500000,"budget_type":"KRW","distance_preference":50,"themes":["NATURE"],"foods":["KOREAN"],"extra_request":""},"required_places":[],"title":"서울 버스 여행","days":[{"day_number":1,"travel_date":"2026-09-24","items":[{"provider":"KAKAO","provider_place_id":"mock-place-1","place_name":"Mock 장소 1","address":"서울시 중구 세종대로 1","road_address":"서울시 중구 세종대로 1","latitude":37.5665,"longitude":126.9780,"category":"관광","sequence":1,"item_type":"TOUR","start_time":"10:00","end_time":"11:00"},{"provider":"KAKAO","provider_place_id":"mock-place-2","place_name":"Mock 장소 2","address":"서울시 종로구 종로 1","road_address":"서울시 종로구 종로 1","latitude":37.5700,"longitude":126.9850,"category":"관광","sequence":2,"item_type":"TOUR","start_time":"12:00","end_time":"13:00","route_from_previous":{"transport_type":"BUS","duration_minutes":35,"distance_meter":8000,"line_name":"간선버스","vehicle_number":"701","legs":[{"mode":"BUS","line_name":"간선버스","vehicle_number":"701","start":{"name":"세종대로입구","station_number":"1001"},"end":{"name":"종로1가","station_number":"1002"}}]}}]}]}
