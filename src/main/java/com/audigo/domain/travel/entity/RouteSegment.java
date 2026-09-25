@@ -46,8 +46,8 @@ public class RouteSegment {
     @Column(name = "distance_meter")
     private Integer distanceMeter;
 
-    @Column(name = "cost")
-    private Integer cost;
+    @Column(name = "total_fare_amount")
+    private Integer totalFareAmount;
 
     @Column(name = "`order`", nullable = false)
     private int order;
@@ -68,7 +68,7 @@ public class RouteSegment {
             TravelTransportType transportType,
             Integer durationMinutes,
             Integer distanceMeter,
-            Integer cost,
+            Integer totalFareAmount,
             int order
     ) {
         this.travelPlan = Objects.requireNonNull(travelPlan, "여행 계획은 필수입니다.");
@@ -84,7 +84,7 @@ public class RouteSegment {
         if (distanceMeter != null && distanceMeter < 0) {
             throw new IllegalArgumentException("이동 거리는 음수일 수 없습니다.");
         }
-        if (cost != null && cost < 0) {
+        if (totalFareAmount != null && totalFareAmount < 0) {
             throw new IllegalArgumentException("이동 비용은 음수일 수 없습니다.");
         }
         if (order < 1) {
@@ -92,7 +92,7 @@ public class RouteSegment {
         }
         this.durationMinutes = durationMinutes;
         this.distanceMeter = distanceMeter;
-        this.cost = cost;
+        this.totalFareAmount = totalFareAmount;
         this.order = order;
     }
 
@@ -103,7 +103,7 @@ public class RouteSegment {
             TravelTransportType transportType,
             Integer durationMinutes,
             Integer distanceMeter,
-            Integer cost,
+            Integer totalFareAmount,
             int order
     ) {
         return new RouteSegment(
@@ -113,7 +113,7 @@ public class RouteSegment {
                 transportType,
                 durationMinutes,
                 distanceMeter,
-                cost,
+                totalFareAmount,
                 order
         );
     }
@@ -158,8 +158,8 @@ public class RouteSegment {
         return distanceMeter;
     }
 
-    public Integer getCost() {
-        return cost;
+    public Integer getTotalFareAmount() {
+        return totalFareAmount;
     }
 
     public int getOrder() {

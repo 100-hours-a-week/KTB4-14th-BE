@@ -102,7 +102,7 @@ class TravelItineraryPersistenceServiceTest {
                 {"result":{"route_segments":[
                   {"day_number":1,"from_sequence":1,"to_sequence":2,
                    "transport_type":"PUBLIC_TRANSPORT","duration_minutes":35,
-                   "distance_meter":8000,"cost":1400,"order":1,
+                   "distance_meter":8000,"total_fare_amount":1400,"order":1,
                    "line_name":"2호선","vehicle_number":"내선","next_arrival_minutes":8,
                    "estimated_arrival_at":"2026-09-22T12:35:00"}
                 ]}}
@@ -114,6 +114,7 @@ class TravelItineraryPersistenceServiceTest {
         org.mockito.Mockito.verify(routeRepository).save(routeCaptor.capture());
         RouteSegment route = routeCaptor.getValue();
         assertThat(route.getTransportType()).isEqualTo(TravelTransportType.PUBLIC_TRANSPORT);
+        assertThat(route.getTotalFareAmount()).isEqualTo(1400);
         assertThat(route.getOrder()).isEqualTo(1);
         TravelItineraryMetadataStore.RouteMetadata metadata = metadataStore.route(301L);
         assertThat(metadata.nextArrivalMinutes()).isEqualTo(8);

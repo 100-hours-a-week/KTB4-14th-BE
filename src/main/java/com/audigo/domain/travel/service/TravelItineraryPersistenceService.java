@@ -354,7 +354,7 @@ public class TravelItineraryPersistenceService {
                     pending.transportType(),
                     pending.durationMinutes(),
                     pending.distanceMeter(),
-                    pending.cost(),
+                    pending.totalFareAmount(),
                     Math.max(1, pending.order())
             ));
             metadataStore.putRoute(route.getId(), pending.metadata());
@@ -562,7 +562,7 @@ public class TravelItineraryPersistenceService {
             TravelTransportType transportType,
             Integer durationMinutes,
             Integer distanceMeter,
-            Integer cost,
+            Integer totalFareAmount,
             int order,
             TravelItineraryMetadataStore.RouteMetadata metadata
     ) {
@@ -578,7 +578,7 @@ public class TravelItineraryPersistenceService {
                 Integer km = integer(node, "distance_km", "distanceKm");
                 distance = km == null ? null : km * 1000;
             }
-            Integer cost = integer(node, "cost", "fare", "fare_amount");
+            Integer totalFareAmount = integer(node, "total_fare_amount");
             int order = positiveInt(first(node, "order"), 1);
             JsonNode firstLeg = firstArrayElement(node, "legs");
             String lineName = text(node, "line_name", "lineName", "line", "subway_line", "bus_number");
@@ -611,7 +611,7 @@ public class TravelItineraryPersistenceService {
                     parseTransport(transport),
                     duration,
                     distance,
-                    cost,
+                    totalFareAmount,
                     order,
                     metadata
             );
