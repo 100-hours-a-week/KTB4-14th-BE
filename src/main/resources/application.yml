@@ -12,10 +12,14 @@ spring:
   jpa:
     hibernate:
       ddl-auto: ${JPA_DDL_AUTO:create}
+    defer-datasource-initialization: true
     open-in-view: false
     properties:
       hibernate:
         format_sql: true
+  sql:
+    init:
+      mode: always
   jackson:
     property-naming-strategy: SNAKE_CASE
 
@@ -41,7 +45,10 @@ audigo:
 
   kakao:
     map:
-      rest-api-key: ${KAKAO_MAP_REST_API_KEY:}
+      rest-api-key: ${KAKAO_REST_API_KEY:}
+    transit:
+      base-url: ${KAKAO_TRANSIT_BASE_URL:https://apis-navi.kakaomobility.com/affiliate/publictransit/v1/multimodal/directions}
+      rest-api-key: ${KAKAO_REST_API_KEY:}
 
   ai:
     base-url: ${AUDIGO_AI_BASE_URL:}
