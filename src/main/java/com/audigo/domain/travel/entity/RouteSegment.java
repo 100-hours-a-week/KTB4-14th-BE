@@ -1,5 +1,6 @@
 package com.audigo.domain.travel.entity;
 
+import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -10,10 +11,15 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.OrderBy;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Objects;
 
 @Entity
@@ -51,6 +57,10 @@ public class RouteSegment {
 
     @Column(name = "`order`", nullable = false)
     private int order;
+
+    @OneToMany(mappedBy = "routeSegment", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("sequence ASC")
+    private List<RouteSegmentLeg> legs = new ArrayList<>();
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
@@ -164,5 +174,20 @@ public class RouteSegment {
 
     public int getOrder() {
         return order;
+    }
+
+    public void addLeg(RouteSegmentLeg leg) {
+        Objects.requireNonNull(leg, "경로 상세 구간은 필수입니다.");
+        if (leg.getRouteSegment() != this) {
+            throw new IllegalArgumentException("경로 상세 구간의 부모 경로가 일치하지 않습니다.");
+        }
+        if (legs.stream().anyMatch(existing -> existing.getSequence() == leg.getSequence())) {
+            throw new IllegalArgumentException("같은 경로에 동일한 leg 순서를 저장할 수 없습니다.");
+        }
+        legs.add(leg);
+    }
+
+    public List<RouteSegmentLeg> getLegs() {
+        return Collections.unmodifiableList(legs);
     }
 }

@@ -7,6 +7,7 @@ import com.audigo.domain.travel.entity.Place;
 import com.audigo.domain.travel.entity.PlaceProvider;
 import com.audigo.domain.travel.entity.PlaceType;
 import com.audigo.domain.travel.entity.RouteSegment;
+import com.audigo.domain.travel.entity.RouteSegmentLeg;
 import com.audigo.domain.travel.entity.TravelGenerationJob;
 import com.audigo.domain.travel.entity.TravelGenerationStage;
 import com.audigo.domain.travel.entity.TravelPlan;
@@ -347,7 +348,7 @@ public class TravelItineraryPersistenceService {
             if (!saved.add(unique)) {
                 continue;
             }
-            RouteSegment route = routeRepository.save(RouteSegment.create(
+            RouteSegment route = RouteSegment.create(
                     plan,
                     from,
                     to,
@@ -356,7 +357,23 @@ public class TravelItineraryPersistenceService {
                     pending.distanceMeter(),
                     pending.totalFareAmount(),
                     Math.max(1, pending.order())
-            ));
+            );
+            for (PendingRouteLeg pendingLeg : pending.legs()) {
+                route.addLeg(RouteSegmentLeg.create(
+                        route,
+                        pendingLeg.sequence(),
+                        pendingLeg.mode(),
+                        pendingLeg.busNumbers(),
+                        pendingLeg.subwayLines(),
+                        pendingLeg.boardingStopName(),
+                        pendingLeg.boardingStationNumber(),
+                        pendingLeg.alightingStopName(),
+                        pendingLeg.alightingStationNumber(),
+                        pendingLeg.durationMinute(),
+                        pendingLeg.distanceMeter()
+                ));
+            }
+            route = routeRepository.save(route);
             metadataStore.putRoute(route.getId(), pending.metadata());
         }
     }
@@ -442,6 +459,48 @@ public class TravelItineraryPersistenceService {
     private static String text(JsonNode node, String... names) {
         JsonNode value = first(node, names);
         return value == null || value.isContainerNode() ? null : value.asText(null);
+    }
+
+    /**
+     * AI가 현재 배열로 보내는 vehicle_number·line_name과
+     * 기존 scalar 응답을 모두 읽는다. 객체나 null 값은 식별자로 사용하지 않는다.
+     */
+    private static List<String> texts(JsonNode node, String... names) {
+        if (node == null || !node.isObject()) {
+            return List.of();
+        }
+        for (String name : names) {
+            JsonNode value = node.get(name);
+            if (value == null || value.isNull()) {
+                continue;
+            }
+            List<String> values = new ArrayList<>();
+            if (value.isArray()) {
+                for (JsonNode item : value) {
+                    addText(values, item);
+                }
+            } else {
+                addText(values, value);
+            }
+            if (!values.isEmpty()) {
+                return List.copyOf(values);
+            }
+        }
+        return List.of();
+    }
+
+    private static void addText(List<String> values, JsonNode value) {
+        if (value == null || value.isContainerNode()) {
+            return;
+        }
+        String text = value.asText(null);
+        if (text != null && !text.isBlank() && !values.contains(text.trim())) {
+            values.add(text.trim());
+        }
+    }
+
+    private static String firstText(List<String> values) {
+        return values == null || values.isEmpty() ? null : values.get(0);
     }
 
     private static int positiveInt(JsonNode value, int fallback) {
@@ -553,6 +612,20 @@ public class TravelItineraryPersistenceService {
     private record DaySequence(int dayNumber, int sequence) {
     }
 
+    private record PendingRouteLeg(
+            int sequence,
+            String mode,
+            List<String> busNumbers,
+            List<String> subwayLines,
+            String boardingStopName,
+            String boardingStationNumber,
+            String alightingStopName,
+            String alightingStationNumber,
+            Integer durationMinute,
+            Integer distanceMeter
+    ) {
+    }
+
     private record PendingRoute(
             int dayNumber,
             Long fromItemId,
@@ -564,6 +637,7 @@ public class TravelItineraryPersistenceService {
             Integer distanceMeter,
             Integer totalFareAmount,
             int order,
+            List<PendingRouteLeg> legs,
             TravelItineraryMetadataStore.RouteMetadata metadata
     ) {
         private static PendingRoute fromJson(int dayNumber, JsonNode node) {
@@ -580,18 +654,24 @@ public class TravelItineraryPersistenceService {
             }
             Integer totalFareAmount = integer(node, "total_fare_amount");
             int order = positiveInt(first(node, "order"), 1);
-            JsonNode firstLeg = firstArrayElement(node, "legs");
-            String lineName = text(node, "line_name", "lineName", "line", "subway_line", "bus_number");
+            List<PendingRouteLeg> legs = parseLegs(node);
+            String lineName = firstText(texts(node, "subway_line", "line_name", "lineName", "line"));
+            String vehicleNumber = firstText(texts(node, "bus_number", "vehicle_number", "vehicleNumber", "vehicle"));
             if (lineName == null) {
-                lineName = text(firstLeg, "line_name", "lineName", "line");
+                lineName = legs.stream()
+                        .flatMap(leg -> leg.subwayLines().stream())
+                        .findFirst()
+                        .orElse(null);
             }
-            String vehicleNumber = text(node, "vehicle_number", "vehicleNumber", "bus_number", "vehicle");
             if (vehicleNumber == null) {
-                vehicleNumber = text(firstLeg, "vehicle_number", "vehicleNumber", "bus_number", "vehicle");
+                vehicleNumber = legs.stream()
+                        .flatMap(leg -> leg.busNumbers().stream())
+                        .findFirst()
+                        .orElse(null);
             }
             String transport = text(node, "transport_type", "transportType", "mode");
             if (transport == null) {
-                transport = text(firstLeg, "mode");
+                transport = legs.stream().map(PendingRouteLeg::mode).findFirst().orElse(null);
             }
             TravelItineraryMetadataStore.RouteMetadata metadata = new TravelItineraryMetadataStore.RouteMetadata(
                     lineName,
@@ -613,13 +693,55 @@ public class TravelItineraryPersistenceService {
                     distance,
                     totalFareAmount,
                     order,
+                    legs,
                     metadata
             );
         }
 
-        private static JsonNode firstArrayElement(JsonNode node, String field) {
-            JsonNode values = first(node, field);
-            return values != null && values.isArray() && !values.isEmpty() ? values.get(0) : null;
+        private static List<PendingRouteLeg> parseLegs(JsonNode node) {
+            JsonNode values = first(node, "legs");
+            if (values == null || !values.isArray()) {
+                return List.of();
+            }
+            List<PendingRouteLeg> legs = new ArrayList<>();
+            int fallbackSequence = 1;
+            for (JsonNode leg : values) {
+                String mode = text(leg, "mode");
+                if (mode == null || mode.isBlank()) {
+                    continue;
+                }
+                JsonNode boardingStop = first(leg, "boarding_stop", "boardingStop", "start");
+                JsonNode alightingStop = first(leg, "alighting_stop", "alightingStop", "end");
+                String normalizedMode = mode.trim().toUpperCase(Locale.ROOT);
+                List<String> busNumbers = isBusMode(normalizedMode)
+                        ? texts(leg, "bus_number", "vehicle_number", "vehicleNumber")
+                        : List.of();
+                List<String> subwayLines = isSubwayMode(normalizedMode)
+                        ? texts(leg, "subway_line", "line_name", "lineName", "line")
+                        : List.of();
+                legs.add(new PendingRouteLeg(
+                        positiveInt(first(leg, "sequence"), fallbackSequence),
+                        normalizedMode,
+                        busNumbers,
+                        subwayLines,
+                        text(boardingStop, "name", "stop_name", "station_name"),
+                        text(boardingStop, "station_number", "stationNumber"),
+                        text(alightingStop, "name", "stop_name", "station_name"),
+                        text(alightingStop, "station_number", "stationNumber"),
+                        integer(leg, "duration_minute", "duration_minutes", "durationMinute", "durationMinutes"),
+                        integer(leg, "distance_meter", "distanceMeter")
+                ));
+                fallbackSequence++;
+            }
+            return List.copyOf(legs);
+        }
+
+        private static boolean isBusMode(String mode) {
+            return "BUS".equals(mode) || "EXPRESSBUS".equals(mode) || "INTERCITY_BUS".equals(mode);
+        }
+
+        private static boolean isSubwayMode(String mode) {
+            return "SUBWAY".equals(mode) || "METRO".equals(mode);
         }
 
         private static Long longValue(JsonNode value) {

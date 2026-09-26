@@ -197,13 +197,29 @@ class TravelItineraryPersistenceServiceTest {
                           "transport_type": "BUS",
                           "duration_minutes": 35,
                           "distance_meter": 8000,
-                          "line_name": "간선버스",
-                          "vehicle_number": "701",
-                          "legs": [{
-                            "mode": "BUS",
-                            "line_name": "간선버스",
-                            "vehicle_number": "701"
-                          }]
+                          "total_fare_amount": 1550,
+                          "legs": [
+                            {
+                              "sequence": 1,
+                              "mode": "BUS",
+                              "boarding_stop": {"name": "출발 정류장", "station_number": null},
+                              "alighting_stop": {"name": "환승 정류장", "station_number": null},
+                              "vehicle_number": ["701", "702"],
+                              "line_name": [],
+                              "duration_minute": 20,
+                              "distance_meter": 5000
+                            },
+                            {
+                              "sequence": 2,
+                              "mode": "SUBWAY",
+                              "boarding_stop": {"name": "환승역", "station_number": null},
+                              "alighting_stop": {"name": "도착역", "station_number": null},
+                              "vehicle_number": [],
+                              "line_name": ["2호선"],
+                              "duration_minute": 15,
+                              "distance_meter": 3000
+                            }
+                          ]
                         }
                       }
                     ]
@@ -215,10 +231,18 @@ class TravelItineraryPersistenceServiceTest {
 
         ArgumentCaptor<RouteSegment> routeCaptor = ArgumentCaptor.forClass(RouteSegment.class);
         org.mockito.Mockito.verify(routeRepository).save(routeCaptor.capture());
-        assertThat(routeCaptor.getValue().getTransportType()).isEqualTo(TravelTransportType.PUBLIC_TRANSPORT);
-        assertThat(routeCaptor.getValue().getOrder()).isEqualTo(1);
+        RouteSegment route = routeCaptor.getValue();
+        assertThat(route.getTransportType()).isEqualTo(TravelTransportType.PUBLIC_TRANSPORT);
+        assertThat(route.getOrder()).isEqualTo(1);
+        assertThat(route.getTotalFareAmount()).isEqualTo(1550);
+        assertThat(route.getLegs()).hasSize(2);
+        assertThat(route.getLegs().get(0).getBusNumbers()).containsExactly("701", "702");
+        assertThat(route.getLegs().get(0).getSubwayLines()).isEmpty();
+        assertThat(route.getLegs().get(0).getBoardingStationNumber()).isNull();
+        assertThat(route.getLegs().get(1).getBusNumbers()).isEmpty();
+        assertThat(route.getLegs().get(1).getSubwayLines()).containsExactly("2호선");
         assertThat(metadataStore.place(102L).address()).isEqualTo("도로명 주소 2");
-        assertThat(metadataStore.route(301L).lineName()).isEqualTo("간선버스");
+        assertThat(metadataStore.route(301L).lineName()).isEqualTo("2호선");
         assertThat(metadataStore.route(301L).vehicleNumber()).isEqualTo("701");
     }
 
