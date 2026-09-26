@@ -13,6 +13,7 @@ import com.audigo.domain.travel.entity.RouteSegment;
 import com.audigo.domain.travel.entity.TravelTransportType;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 class PublicTransportRealtimeServiceTest {
@@ -22,15 +23,13 @@ class PublicTransportRealtimeServiceTest {
     @Test
     void 대중교통_경로의_출발도착좌표를_카카오에_전달하고_현재시각기준_예상시간을_갱신한다() {
         TravelItineraryMetadataStore store = new TravelItineraryMetadataStore();
+        KakaoTransitCoordinateResolver coordinateResolver = mock(KakaoTransitCoordinateResolver.class);
         KakaoPublicTransitClient client = mock(KakaoPublicTransitClient.class);
         RouteSegment route = route(10L, TravelTransportType.PUBLIC_TRANSPORT, 101L, 102L);
-        store.putPlace(101L, new TravelItineraryMetadataStore.PlaceMetadata(
-                "출발지", "출발지 주소", new BigDecimal("35.100"), new BigDecimal("129.100")));
-        store.putPlace(102L, new TravelItineraryMetadataStore.PlaceMetadata(
-                "도착지", "도착지 주소", new BigDecimal("35.200"), new BigDecimal("129.200")));
         store.putRoute(10L, new TravelItineraryMetadataStore.RouteMetadata(
                 "2호선", "내선", 8, null,
                 LocalDateTime.of(2026, 9, 22, 12, 35), false, null));
+        when(coordinateResolver.resolve(route)).thenReturn(Optional.of(coordinates()));
         when(client.findRoute(
                 any(BigDecimal.class),
                 any(BigDecimal.class),
@@ -48,7 +47,8 @@ class PublicTransportRealtimeServiceTest {
                 1
         ));
 
-        PublicTransportRealtimeService service = new PublicTransportRealtimeService(store, client);
+        PublicTransportRealtimeService service = new PublicTransportRealtimeService(
+                store, coordinateResolver, client);
 
         service.refresh(route, COMPLETED_AT);
 
@@ -74,7 +74,10 @@ class PublicTransportRealtimeServiceTest {
     @Test
     void 출발도착좌표가_없으면_카카오를_호출하지_않고_AI_계산값을_유지한다() {
         TravelItineraryMetadataStore store = new TravelItineraryMetadataStore();
+        KakaoTransitCoordinateResolver coordinateResolver = mock(KakaoTransitCoordinateResolver.class);
         KakaoPublicTransitClient client = mock(KakaoPublicTransitClient.class);
+        RouteSegment route = route(10L, TravelTransportType.PUBLIC_TRANSPORT, 101L, 102L);
+        when(coordinateResolver.resolve(route)).thenReturn(Optional.empty());
         TravelItineraryMetadataStore.RouteMetadata initial =
                 new TravelItineraryMetadataStore.RouteMetadata(
                         "2호선", "내선", 8,
@@ -85,9 +88,10 @@ class PublicTransportRealtimeServiceTest {
                 );
         store.putRoute(10L, initial);
 
-        PublicTransportRealtimeService service = new PublicTransportRealtimeService(store, client);
+        PublicTransportRealtimeService service = new PublicTransportRealtimeService(
+                store, coordinateResolver, client);
 
-        service.refresh(route(10L, TravelTransportType.PUBLIC_TRANSPORT, 101L, 102L), COMPLETED_AT);
+        service.refresh(route, COMPLETED_AT);
 
         assertThat(store.route(10L)).isEqualTo(initial);
         verify(client, never()).findRoute(
@@ -103,9 +107,10 @@ class PublicTransportRealtimeServiceTest {
     @Test
     void 카카오_API가_실패하면_AI_계산값을_유지하고_realtime을_켜지_않는다() {
         TravelItineraryMetadataStore store = new TravelItineraryMetadataStore();
+        KakaoTransitCoordinateResolver coordinateResolver = mock(KakaoTransitCoordinateResolver.class);
         KakaoPublicTransitClient client = mock(KakaoPublicTransitClient.class);
         RouteSegment route = route(10L, TravelTransportType.PUBLIC_TRANSPORT, 101L, 102L);
-        putPlaces(store);
+        when(coordinateResolver.resolve(route)).thenReturn(Optional.of(coordinates()));
         TravelItineraryMetadataStore.RouteMetadata initial =
                 new TravelItineraryMetadataStore.RouteMetadata(
                         "2호선", "내선", 8,
@@ -124,7 +129,8 @@ class PublicTransportRealtimeServiceTest {
                 any(KakaoPublicTransitClient.RouteType.class)
         )).thenThrow(new KakaoPublicTransitClient.KakaoPublicTransitException("test failure"));
 
-        PublicTransportRealtimeService service = new PublicTransportRealtimeService(store, client);
+        PublicTransportRealtimeService service = new PublicTransportRealtimeService(
+                store, coordinateResolver, client);
 
         service.refresh(route, COMPLETED_AT);
 
@@ -134,8 +140,10 @@ class PublicTransportRealtimeServiceTest {
     @Test
     void 도보와_자동차_경로는_카카오를_호출하지_않는다() {
         TravelItineraryMetadataStore store = new TravelItineraryMetadataStore();
+        KakaoTransitCoordinateResolver coordinateResolver = mock(KakaoTransitCoordinateResolver.class);
         KakaoPublicTransitClient client = mock(KakaoPublicTransitClient.class);
-        PublicTransportRealtimeService service = new PublicTransportRealtimeService(store, client);
+        PublicTransportRealtimeService service = new PublicTransportRealtimeService(
+                store, coordinateResolver, client);
 
         service.refresh(route(11L, TravelTransportType.WALK, 101L, 102L), COMPLETED_AT);
         service.refresh(route(12L, TravelTransportType.CAR, 101L, 102L), COMPLETED_AT);
@@ -152,11 +160,13 @@ class PublicTransportRealtimeServiceTest {
         );
     }
 
-    private void putPlaces(TravelItineraryMetadataStore store) {
-        store.putPlace(101L, new TravelItineraryMetadataStore.PlaceMetadata(
-                "출발지", "출발지 주소", new BigDecimal("35.100"), new BigDecimal("129.100")));
-        store.putPlace(102L, new TravelItineraryMetadataStore.PlaceMetadata(
-                "도착지", "도착지 주소", new BigDecimal("35.200"), new BigDecimal("129.200")));
+    private KakaoTransitCoordinateResolver.Coordinates coordinates() {
+        return new KakaoTransitCoordinateResolver.Coordinates(
+                new BigDecimal("129.100"),
+                new BigDecimal("35.100"),
+                new BigDecimal("129.200"),
+                new BigDecimal("35.200")
+        );
     }
 
     private RouteSegment route(Long id, TravelTransportType transportType, Long fromId, Long toId) {

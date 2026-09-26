@@ -2,9 +2,9 @@ package com.audigo.domain.travel.service;
 
 import com.audigo.domain.travel.entity.RouteSegment;
 import com.audigo.domain.travel.entity.TravelTransportType;
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -16,13 +16,16 @@ public class PublicTransportRealtimeService {
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
     private final TravelItineraryMetadataStore metadataStore;
+    private final KakaoTransitCoordinateResolver coordinateResolver;
     private final KakaoPublicTransitClient kakaoPublicTransitClient;
 
     public PublicTransportRealtimeService(
             TravelItineraryMetadataStore metadataStore,
+            KakaoTransitCoordinateResolver coordinateResolver,
             KakaoPublicTransitClient kakaoPublicTransitClient
     ) {
         this.metadataStore = metadataStore;
+        this.coordinateResolver = coordinateResolver;
         this.kakaoPublicTransitClient = kakaoPublicTransitClient;
     }
 
@@ -32,26 +35,25 @@ public class PublicTransportRealtimeService {
         }
 
         TravelItineraryMetadataStore.RouteMetadata current = currentMetadata(route);
-        PlaceCoordinates coordinates = coordinates(route);
-        if (coordinates == null) {
-            log.warn("출발·도착 장소 좌표가 없어 카카오 대중교통 경로를 조회하지 않습니다. routeId={}", route.getId());
-            metadataStore.putRoute(route.getId(), withoutRealtime(current));
-            return;
-        }
-
         LocalDateTime requestAt = completedAt == null ? LocalDateTime.now(KST) : completedAt;
         try {
+            Optional<KakaoTransitCoordinateResolver.Coordinates> coordinates = coordinateResolver.resolve(route);
+            if (coordinates.isEmpty()) {
+                log.warn("출발·도착 장소 좌표를 조회하지 못해 카카오 경로를 호출하지 않습니다. routeId={}", route.getId());
+                metadataStore.putRoute(route.getId(), withoutRealtime(current));
+                return;
+            }
+            KakaoTransitCoordinateResolver.Coordinates resolvedCoordinates = coordinates.get();
             KakaoPublicTransitClient.RouteResult result = kakaoPublicTransitClient.findRoute(
-                    coordinates.startLongitude(),
-                    coordinates.startLatitude(),
-                    coordinates.goalLongitude(),
-                    coordinates.goalLatitude(),
+                    resolvedCoordinates.startLongitude(),
+                    resolvedCoordinates.startLatitude(),
+                    resolvedCoordinates.goalLongitude(),
+                    resolvedCoordinates.goalLatitude(),
                     requestAt,
                     KakaoPublicTransitClient.RouteType.ALL
             );
 
-            // Kakao의 total_time은 요청 시각 기준 목적지까지의 예상 소요 시간이다.
-            // 기존 FE 응답 필드와의 호환을 위해 분 단위로 next_arrival_minutes에 함께 전달한다.
+            // Kakao의 total_time은 요청 시각 기준 목적지까지의 예상 소요 시간
             metadataStore.putRoute(route.getId(), new TravelItineraryMetadataStore.RouteMetadata(
                     current.lineName(),
                     current.vehicleNumber(),
@@ -81,33 +83,6 @@ public class PublicTransportRealtimeService {
                 null, null, null, null, null, false, null);
     }
 
-    private PlaceCoordinates coordinates(RouteSegment route) {
-        if (route.getFromItineraryItem() == null || route.getToItineraryItem() == null) {
-            return null;
-        }
-
-        Long startItemId = route.getFromItineraryItem().getId();
-        Long goalItemId = route.getToItineraryItem().getId();
-        if (startItemId == null || goalItemId == null) {
-            return null;
-        }
-        TravelItineraryMetadataStore.PlaceMetadata start = metadataStore.place(startItemId);
-        TravelItineraryMetadataStore.PlaceMetadata goal = metadataStore.place(goalItemId);
-        if (!hasCoordinates(start) || !hasCoordinates(goal)) {
-            return null;
-        }
-        return new PlaceCoordinates(
-                start.longitude(),
-                start.latitude(),
-                goal.longitude(),
-                goal.latitude()
-        );
-    }
-
-    private static boolean hasCoordinates(TravelItineraryMetadataStore.PlaceMetadata metadata) {
-        return metadata != null && metadata.latitude() != null && metadata.longitude() != null;
-    }
-
     private static int toMinutes(int seconds) {
         return (seconds + 59) / 60;
     }
@@ -126,11 +101,4 @@ public class PublicTransportRealtimeService {
         );
     }
 
-    private record PlaceCoordinates(
-            BigDecimal startLongitude,
-            BigDecimal startLatitude,
-            BigDecimal goalLongitude,
-            BigDecimal goalLatitude
-    ) {
-    }
 }
