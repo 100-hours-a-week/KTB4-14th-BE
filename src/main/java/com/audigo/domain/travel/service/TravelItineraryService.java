@@ -17,6 +17,7 @@ import com.audigo.domain.travel.repository.TravelPlanRepository;
 import com.audigo.global.error.BusinessException;
 import com.audigo.global.error.ErrorCode;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -30,6 +31,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class TravelItineraryService {
 
     private static final Logger log = LoggerFactory.getLogger(TravelItineraryService.class);
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
     private final TravelPlanRepository travelPlanRepository;
     private final ItineraryDayRepository dayRepository;
@@ -102,10 +104,21 @@ public class TravelItineraryService {
         if (plan.getStatus() != TravelPlanStatus.COMPLETED) {
             throw new BusinessException(ErrorCode.VALIDATION_FAILED);
         }
-        // V1에서는 AI가 계산해 저장한 1차 경로를 유지하고, 완료 시 대중교통만 실시간 업데이트 처리
         List<RouteSegment> routes = routeRepository.findAllByTravelPlanId(travelPlanId).stream()
                 .sorted(java.util.Comparator.comparingInt(RouteSegment::getOrder))
                 .toList();
+        LocalDateTime refreshedAt = LocalDateTime.now(KST);
+        routes.stream()
+                .filter(route -> route.getTransportType() == TravelTransportType.PUBLIC_TRANSPORT)
+                .forEach(route -> {
+                    try {
+                        realtimeService.refresh(route, refreshedAt);
+                    } catch (RuntimeException exception) {
+                        // 카카오 장애가 경로 재계산 응답 자체를 실패시키지 않도록 기존 메타데이터를 유지한다.
+                        log.warn("대중교통 경로 실시간 갱신에 실패했지만 경로 응답은 반환합니다. routeId={}",
+                                route.getId(), exception);
+                    }
+                });
         return new RouteRecalculationResponse(
                 travelPlanId,
                 routes.stream().map(route -> ItineraryResponse.RouteSegmentResponse.from(
