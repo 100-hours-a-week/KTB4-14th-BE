@@ -1,8 +1,8 @@
 package com.audigo.domain.travel.dto;
 
-import com.audigo.domain.travel.entity.ItineraryDay;
 import com.audigo.domain.travel.entity.ItineraryItem;
 import com.audigo.domain.travel.entity.RouteSegment;
+import com.audigo.domain.travel.entity.RouteSegmentLeg;
 import com.audigo.domain.travel.entity.TravelPlan;
 import com.audigo.domain.travel.entity.TravelPlanPlace;
 import com.audigo.domain.travel.entity.TravelTransportType;
@@ -106,8 +106,11 @@ public record ItineraryResponse(
             @JsonProperty("transport_type") TravelTransportType transportType,
             @JsonProperty("duration_minutes") Integer durationMinutes,
             @JsonProperty("distance_meter") Integer distanceMeter,
-            @JsonProperty("cost") Integer cost,
+            @JsonProperty("total_fare_amount") Integer totalFareAmount,
             @JsonProperty("order") int order,
+            /** AI의 legs 전체를 백엔드 표준 구조로 변환한 상세 이동 구간 */
+            @JsonProperty("legs") List<RouteLegResponse> legs,
+            /** 기존 실시간 도착정보 호환을 위해 유지하는 대표 노선·차량 값 */
             @JsonProperty("line_name") String lineName,
             @JsonProperty("vehicle_number") String vehicleNumber,
             @JsonProperty("next_arrival_minutes") Integer nextArrivalMinutes,
@@ -116,6 +119,10 @@ public record ItineraryResponse(
             @JsonProperty("realtime") boolean realtime,
             @JsonProperty("last_refreshed_at") LocalDateTime lastRefreshedAt
     ) {
+        public RouteSegmentResponse {
+            legs = legs == null ? List.of() : List.copyOf(legs);
+        }
+
         public static RouteSegmentResponse from(
                 RouteSegment route,
                 TravelItineraryMetadataStore.RouteMetadata metadata
@@ -127,8 +134,9 @@ public record ItineraryResponse(
                     route.getTransportType(),
                     route.getDurationMinutes(),
                     route.getDistanceMeter(),
-                    route.getCost(),
+                    route.getTotalFareAmount(),
                     route.getOrder(),
+                    route.getLegs().stream().map(RouteLegResponse::from).toList(),
                     metadata == null ? null : metadata.lineName(),
                     metadata == null ? null : metadata.vehicleNumber(),
                     metadata == null ? null : metadata.nextArrivalMinutes(),
@@ -138,5 +146,40 @@ public record ItineraryResponse(
                     metadata == null ? null : metadata.lastRefreshedAt()
             );
         }
+    }
+
+    public record RouteLegResponse(
+            @JsonProperty("sequence") int sequence,
+            @JsonProperty("mode") String mode,
+            @JsonProperty("boarding_stop") StopResponse boardingStop,
+            @JsonProperty("alighting_stop") StopResponse alightingStop,
+            @JsonProperty("duration_minute") Integer durationMinute,
+            @JsonProperty("distance_meter") Integer distanceMeter,
+            @JsonProperty("bus_number") List<String> busNumbers,
+            @JsonProperty("subway_line") List<String> subwayLines
+    ) {
+        public RouteLegResponse {
+            busNumbers = busNumbers == null ? List.of() : List.copyOf(busNumbers);
+            subwayLines = subwayLines == null ? List.of() : List.copyOf(subwayLines);
+        }
+
+        private static RouteLegResponse from(RouteSegmentLeg leg) {
+            return new RouteLegResponse(
+                    leg.getSequence(),
+                    leg.getMode(),
+                    new StopResponse(leg.getBoardingStopName(), leg.getBoardingStationNumber()),
+                    new StopResponse(leg.getAlightingStopName(), leg.getAlightingStationNumber()),
+                    leg.getDurationMinute(),
+                    leg.getDistanceMeter(),
+                    leg.getBusNumbers(),
+                    leg.getSubwayLines()
+            );
+        }
+    }
+
+    public record StopResponse(
+            @JsonProperty("name") String name,
+            @JsonProperty("station_number") String stationNumber
+    ) {
     }
 }

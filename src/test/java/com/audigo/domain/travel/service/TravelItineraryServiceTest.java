@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
@@ -26,6 +27,7 @@ import com.audigo.domain.travel.repository.RouteSegmentRepository;
 import com.audigo.domain.travel.repository.TravelPlanRepository;
 import com.audigo.global.error.BusinessException;
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
@@ -113,6 +115,22 @@ class TravelItineraryServiceTest {
     }
 
     @Test
+    void 경로_재계산은_현재시각으로_대중교통_경로만_갱신한다() {
+        TravelPlan plan = mock(TravelPlan.class);
+        when(plan.getStatus()).thenReturn(TravelPlanStatus.COMPLETED);
+        when(travelPlanRepository.findByIdAndUserId(55L, 7L)).thenReturn(Optional.of(plan));
+
+        RouteSegment publicRoute = route(201L, TravelTransportType.PUBLIC_TRANSPORT, 101L, 102L);
+        RouteSegment walkRoute = route(202L, TravelTransportType.WALK, 102L, 103L);
+        when(routeRepository.findAllByTravelPlanId(55L)).thenReturn(List.of(publicRoute, walkRoute));
+
+        service.recalculateRoutes(7L, 55L);
+
+        verify(realtimeService).refresh(eq(publicRoute), any(LocalDateTime.class));
+        verify(realtimeService, never()).refresh(eq(walkRoute), any(LocalDateTime.class));
+    }
+
+    @Test
     void 다른_사용자는_일정_완료를_처리할_수_없다() {
         when(itemRepository.findByIdAndItineraryDayTravelPlanUserId(101L, 999L))
                 .thenReturn(Optional.empty());
@@ -155,12 +173,16 @@ class TravelItineraryServiceTest {
         ItineraryItem from = mock(ItineraryItem.class);
         ItineraryItem to = mock(ItineraryItem.class);
         when(route.getTransportType()).thenReturn(type);
-        if (type == TravelTransportType.PUBLIC_TRANSPORT) {
-            lenient().when(route.getFromItineraryItem()).thenReturn(from);
-            lenient().when(route.getToItineraryItem()).thenReturn(to);
-            lenient().when(from.getId()).thenReturn(fromId);
-            lenient().when(to.getId()).thenReturn(toId);
-        }
+        lenient().when(route.getId()).thenReturn(id);
+        lenient().when(route.getFromItineraryItem()).thenReturn(from);
+        lenient().when(route.getToItineraryItem()).thenReturn(to);
+        lenient().when(from.getId()).thenReturn(fromId);
+        lenient().when(to.getId()).thenReturn(toId);
+        lenient().when(route.getDurationMinutes()).thenReturn(null);
+        lenient().when(route.getDistanceMeter()).thenReturn(null);
+        lenient().when(route.getTotalFareAmount()).thenReturn(null);
+        lenient().when(route.getOrder()).thenReturn(id.intValue());
+        lenient().when(route.getLegs()).thenReturn(Collections.emptyList());
         return route;
     }
 }

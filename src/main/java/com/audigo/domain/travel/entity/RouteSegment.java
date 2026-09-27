@@ -1,5 +1,6 @@
 package com.audigo.domain.travel.entity;
 
+import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -10,10 +11,15 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.OrderBy;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Objects;
 
 @Entity
@@ -46,11 +52,15 @@ public class RouteSegment {
     @Column(name = "distance_meter")
     private Integer distanceMeter;
 
-    @Column(name = "cost")
-    private Integer cost;
+    @Column(name = "total_fare_amount")
+    private Integer totalFareAmount;
 
     @Column(name = "`order`", nullable = false)
     private int order;
+
+    @OneToMany(mappedBy = "routeSegment", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("sequence ASC")
+    private List<RouteSegmentLeg> legs = new ArrayList<>();
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
@@ -68,7 +78,7 @@ public class RouteSegment {
             TravelTransportType transportType,
             Integer durationMinutes,
             Integer distanceMeter,
-            Integer cost,
+            Integer totalFareAmount,
             int order
     ) {
         this.travelPlan = Objects.requireNonNull(travelPlan, "여행 계획은 필수입니다.");
@@ -84,7 +94,7 @@ public class RouteSegment {
         if (distanceMeter != null && distanceMeter < 0) {
             throw new IllegalArgumentException("이동 거리는 음수일 수 없습니다.");
         }
-        if (cost != null && cost < 0) {
+        if (totalFareAmount != null && totalFareAmount < 0) {
             throw new IllegalArgumentException("이동 비용은 음수일 수 없습니다.");
         }
         if (order < 1) {
@@ -92,7 +102,7 @@ public class RouteSegment {
         }
         this.durationMinutes = durationMinutes;
         this.distanceMeter = distanceMeter;
-        this.cost = cost;
+        this.totalFareAmount = totalFareAmount;
         this.order = order;
     }
 
@@ -103,7 +113,7 @@ public class RouteSegment {
             TravelTransportType transportType,
             Integer durationMinutes,
             Integer distanceMeter,
-            Integer cost,
+            Integer totalFareAmount,
             int order
     ) {
         return new RouteSegment(
@@ -113,7 +123,7 @@ public class RouteSegment {
                 transportType,
                 durationMinutes,
                 distanceMeter,
-                cost,
+                totalFareAmount,
                 order
         );
     }
@@ -158,11 +168,26 @@ public class RouteSegment {
         return distanceMeter;
     }
 
-    public Integer getCost() {
-        return cost;
+    public Integer getTotalFareAmount() {
+        return totalFareAmount;
     }
 
     public int getOrder() {
         return order;
+    }
+
+    public void addLeg(RouteSegmentLeg leg) {
+        Objects.requireNonNull(leg, "경로 상세 구간은 필수입니다.");
+        if (leg.getRouteSegment() != this) {
+            throw new IllegalArgumentException("경로 상세 구간의 부모 경로가 일치하지 않습니다.");
+        }
+        if (legs.stream().anyMatch(existing -> existing.getSequence() == leg.getSequence())) {
+            throw new IllegalArgumentException("같은 경로에 동일한 leg 순서를 저장할 수 없습니다.");
+        }
+        legs.add(leg);
+    }
+
+    public List<RouteSegmentLeg> getLegs() {
+        return Collections.unmodifiableList(legs);
     }
 }
