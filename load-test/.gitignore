@@ -1,0 +1,9 @@
+# Environment
+.env
+
+# Real test data
+data/test-ids.json
+
+# Load test results
+results/*
+!results/.gitkeep
