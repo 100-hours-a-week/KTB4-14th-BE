@@ -1,19 +1,33 @@
 package com.audigo.domain.travel.service;
 
 import com.audigo.domain.travel.dto.AiTravelGenerationRequest;
+import com.audigo.domain.travel.dto.PlaceSearchItemResponse;
+import com.audigo.domain.travel.dto.PlaceSearchResponse;
 import com.audigo.domain.travel.dto.RequiredPlaceRequest;
 import com.audigo.domain.travel.dto.TravelPlanRequest;
 import com.audigo.domain.travel.dto.TravelPreferenceRequest;
+import com.audigo.domain.travel.entity.PlaceProvider;
 import com.audigo.domain.travel.entity.PlaceType;
 import com.audigo.domain.travel.entity.TravelPlan;
 import com.audigo.domain.travel.entity.TravelPlanPlace;
 import com.audigo.domain.travel.entity.TravelPreferenceFood;
 import com.audigo.domain.travel.entity.TravelPreferenceTheme;
+import com.audigo.global.error.BusinessException;
+import com.audigo.global.error.ErrorCode;
 import java.util.List;
 import org.springframework.stereotype.Component;
 
 @Component
 public class TravelGenerationRequestFactory {
+
+    private static final int PLACE_SEARCH_PAGE = 1;
+    private static final int PLACE_SEARCH_SIZE = 15;
+
+    private final KakaoPlaceSearchService kakaoPlaceSearchService;
+
+    public TravelGenerationRequestFactory(KakaoPlaceSearchService kakaoPlaceSearchService) {
+        this.kakaoPlaceSearchService = kakaoPlaceSearchService;
+    }
 
     public AiTravelGenerationRequest from(TravelPlan plan, TravelPlanRequest request) {
         if (request != null && request.preference() != null) {
@@ -64,17 +78,8 @@ public class TravelGenerationRequestFactory {
                 preference.getFoods().stream().map(TravelPreferenceFood::getFoodType).map(Enum::name).toList(),
                 preference.getExtraRequest()
         );
-        List<AiTravelGenerationRequest.PlaceContext> places = plan.getRequiredPlaces().stream()
-                .map(place -> new AiTravelGenerationRequest.PlaceContext(
-                        place.getPlace().getProvider().name(),
-                        place.getPlace().getProviderPlaceId(),
-                        null,
-                        null,
-                        null,
-                        null,
-                        aiPlaceType(place.getPlaceType()),
-                        place.getPlaceOrder()
-                ))
+        List<AiTravelGenerationRequest.PlaceContext> places = plan.getUserRequiredPlaces().stream()
+                .map(place -> fromStoredPlace(plan, place))
                 .toList();
         return new AiTravelGenerationRequest(
                 plan.getId(),
@@ -87,6 +92,51 @@ public class TravelGenerationRequestFactory {
                 aiPreference,
                 places
         );
+    }
+
+    private AiTravelGenerationRequest.PlaceContext fromStoredPlace(
+            TravelPlan plan,
+            TravelPlanPlace storedPlace
+    ) {
+        var place = storedPlace.getPlace();
+        PlaceSearchItemResponse resolved = resolvePlace(plan, place.getProvider(), place.getProviderPlaceId());
+        String address = resolved.roadAddress() == null || resolved.roadAddress().isBlank()
+                ? resolved.address()
+                : resolved.roadAddress();
+        return new AiTravelGenerationRequest.PlaceContext(
+                place.getProvider().name(),
+                place.getProviderPlaceId(),
+                resolved.placeName(),
+                address,
+                resolved.latitude(),
+                resolved.longitude(),
+                aiPlaceType(storedPlace.getPlaceType()),
+                storedPlace.getPlaceOrder()
+        );
+    }
+
+    private PlaceSearchItemResponse resolvePlace(
+            TravelPlan plan,
+            PlaceProvider provider,
+            String providerPlaceId
+    ) {
+        PlaceSearchResponse response = kakaoPlaceSearchService.search(
+                plan.getRegion().getId(),
+                providerPlaceId,
+                PLACE_SEARCH_PAGE,
+                PLACE_SEARCH_SIZE
+        );
+        List<PlaceSearchItemResponse> matches = response == null || response.places() == null
+                ? List.of()
+                : response.places().stream()
+                .filter(candidate -> candidate != null)
+                .filter(candidate -> candidate.provider() == provider)
+                .filter(candidate -> providerPlaceId.equals(candidate.providerPlaceId()))
+                .toList();
+        if (matches.size() != 1) {
+            throw new BusinessException(ErrorCode.EXTERNAL_API_ERROR);
+        }
+        return matches.get(0);
     }
 
     private AiTravelGenerationRequest.PlaceContext fromRequiredPlace(RequiredPlaceRequest place) {

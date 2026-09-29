@@ -7,12 +7,16 @@ import com.audigo.domain.travel.entity.TravelGenerationJob;
 import com.audigo.domain.travel.repository.TravelPlanRepository;
 import com.audigo.global.error.BusinessException;
 import com.audigo.global.error.ErrorCode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 // 여행 생성 요청과 AI SSE 작업 사이의 조정 계층
 @Service
 public class TravelGenerationOrchestrator {
+
+    private static final Logger log = LoggerFactory.getLogger(TravelGenerationOrchestrator.class);
 
     private final TravelPlanRepository travelPlanRepository;
     private final TravelGenerationJobService jobService;
@@ -37,13 +41,13 @@ public class TravelGenerationOrchestrator {
         this.worker = worker;
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public Long schedule(Long userId, Long travelPlanId, TravelPlanRequest request) {
         TravelGenerationJob job = jobService.findLatestJob(userId, travelPlanId);
         return schedule(job, request);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public Long scheduleJob(Long userId, Long jobId, TravelPlanRequest request) {
         TravelGenerationJob job = jobService.findOwnedJob(userId, jobId);
         return schedule(job, request);
@@ -66,9 +70,15 @@ public class TravelGenerationOrchestrator {
         }
         var plan = travelPlanRepository.findById(job.getTravelPlan().getId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.VALIDATION_FAILED));
-        AiTravelGenerationRequest aiRequest = requestFactory.from(plan, request);
-        contextStore.put(job.getId(), aiRequest);
         progressStore.initialize(job.getId());
+        try {
+            AiTravelGenerationRequest aiRequest = requestFactory.from(plan, request);
+            contextStore.put(job.getId(), aiRequest);
+        } catch (RuntimeException exception) {
+            log.warn("AI 생성 요청에 필요한 장소 정보를 준비하지 못했습니다. jobId={}", job.getId(), exception);
+            jobService.markFailed(job.getId(), "AI 생성에 필요한 장소 정보를 불러오지 못했습니다.");
+            return job.getId();
+        }
         worker.run(job.getId());
         return job.getId();
     }

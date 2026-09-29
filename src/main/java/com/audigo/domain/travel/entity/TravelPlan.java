@@ -191,6 +191,12 @@ public class TravelPlan {
         return Collections.unmodifiableList(requiredPlaces);
     }
 
+    public List<TravelPlanPlace> getUserRequiredPlaces() {
+        return requiredPlaces.stream()
+                .filter(place -> place.getSource() == TravelPlaceSource.USER_REQUIRED)
+                .toList();
+    }
+
     public LocalDateTime getCreatedAt(){
         return createdAt;
     }
