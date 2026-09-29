@@ -13,5 +13,7 @@ public interface TravelGenerationJobRepository extends JpaRepository<TravelGener
 
     Optional<TravelGenerationJob> findByIdAndTravelPlanUserId(Long jobId, Long userId);
 
+    boolean existsByTravelPlanUserIdAndStatus(Long userId, TravelPlanStatus status);
+
     List<TravelGenerationJob> findByStatusAndStartedAtBefore(TravelPlanStatus status, LocalDateTime startedAt);
 }
