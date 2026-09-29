@@ -93,6 +93,12 @@ public class TravelPlanService {
     @Transactional
     public TravelPlan createTravelPlan(Long userId, TravelPlanRequest request) {
         validateRequest(request);
+        if (travelGenerationJobRepository.existsByTravelPlanUserIdAndStatus(
+                userId,
+                TravelPlanStatus.GENERATING
+        )) {
+            throw new BusinessException(ErrorCode.TRAVEL_GENERATION_IN_PROGRESS);
+        }
 
         Region region = regionRepository.findById(request.regionId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.REGION_NOT_FOUND));
