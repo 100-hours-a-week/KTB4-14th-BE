@@ -89,6 +89,17 @@ public class TravelPlanService {
                 .toList();
     }
 
+    @Transactional
+    public TravelSummaryResponse confirmTravel(Long userId, Long travelPlanId) {
+        TravelPlan travelPlan = travelPlanRepository.findByIdAndUserId(travelPlanId, userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.VALIDATION_FAILED));
+        if (travelPlan.getStatus() != TravelPlanStatus.COMPLETED) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED);
+        }
+        travelPlan.confirm(LocalDateTime.now());
+        return TravelSummaryResponse.from(travelPlan);
+    }
+
     // 여행 생성하기 요청(1단계)
     @Transactional
     public TravelPlan createTravelPlan(Long userId, TravelPlanRequest request) {
