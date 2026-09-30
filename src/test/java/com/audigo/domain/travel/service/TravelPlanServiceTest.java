@@ -87,6 +87,25 @@ class TravelPlanServiceTest {
     }
 
     @Test
+    void finds_recent_travels_from_confirmed_completed_plans() {
+        TravelPlan travelPlan = pastTravelPlan();
+        travelPlan.markCompleted();
+        travelPlan.confirm(LocalDateTime.now());
+        when(travelPlanRepository
+                .findTop5ByUserIdAndStatusAndConfirmedAtIsNotNullAndDepartureDatetimeLessThanOrderByDepartureDatetimeDesc(
+                        org.mockito.ArgumentMatchers.eq(1L),
+                        org.mockito.ArgumentMatchers.eq(TravelPlanStatus.COMPLETED),
+                        any(LocalDateTime.class)
+                )).thenReturn(List.of(travelPlan));
+
+        var responses = travelPlanService.getRecentTravels(1L);
+
+        assertThat(responses).hasSize(1);
+        assertThat(responses.get(0).status()).isEqualTo(TravelPlanStatus.COMPLETED);
+        assertThat(responses.get(0).confirmedAt()).isEqualTo(travelPlan.getConfirmedAt());
+    }
+
+    @Test
     void confirms_completed_travel_plan() {
         TravelPlan travelPlan = travelPlan();
         travelPlan.markCompleted();
@@ -138,6 +157,18 @@ class TravelPlanServiceTest {
 
     private TravelPlan travelPlan() {
         LocalDateTime arrival = LocalDateTime.now().plusDays(1);
+        return TravelPlan.create(
+                1L,
+                Region.create("강남구", "서울특별시 강남구"),
+                arrival,
+                arrival.plusDays(2),
+                2,
+                CompanionType.FRIEND
+        );
+    }
+
+    private TravelPlan pastTravelPlan() {
+        LocalDateTime arrival = LocalDateTime.now().minusDays(3);
         return TravelPlan.create(
                 1L,
                 Region.create("강남구", "서울특별시 강남구"),
