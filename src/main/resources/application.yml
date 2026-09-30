@@ -52,6 +52,7 @@ audigo:
   kakao:
     map:
       rest-api-key: ${KAKAO_REST_API_KEY:}
+      place-detail-base-url: ${KAKAO_PLACE_DETAIL_BASE_URL:https://place.map.kakao.com}
     transit:
       base-url: ${KAKAO_TRANSIT_BASE_URL:https://apis-navi.kakaomobility.com/affiliate/publictransit/v1/multimodal/directions}
       rest-api-key: ${KAKAO_REST_API_KEY:}
