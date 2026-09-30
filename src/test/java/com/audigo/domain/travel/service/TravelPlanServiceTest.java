@@ -11,7 +11,9 @@ import com.audigo.domain.travel.dto.TravelPreferenceRequest;
 import com.audigo.domain.travel.entity.BudgetType;
 import com.audigo.domain.travel.entity.CompanionType;
 import com.audigo.domain.travel.entity.FoodType;
+import com.audigo.domain.travel.entity.Region;
 import com.audigo.domain.travel.entity.TravelPaceType;
+import com.audigo.domain.travel.entity.TravelPlan;
 import com.audigo.domain.travel.entity.TravelPlanStatus;
 import com.audigo.domain.travel.entity.TravelThemeType;
 import com.audigo.domain.travel.entity.TravelTransportType;
@@ -23,6 +25,7 @@ import com.audigo.global.error.BusinessException;
 import com.audigo.global.error.ErrorCode;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -63,6 +66,32 @@ class TravelPlanServiceTest {
         verify(travelPlanRepository, never()).save(org.mockito.ArgumentMatchers.any());
     }
 
+    @Test
+    void confirms_completed_travel_plan() {
+        TravelPlan travelPlan = travelPlan();
+        travelPlan.markCompleted();
+        when(travelPlanRepository.findByIdAndUserId(10L, 1L)).thenReturn(Optional.of(travelPlan));
+
+        var response = travelPlanService.confirmTravel(1L, 10L);
+
+        assertThat(travelPlan.isConfirmed()).isTrue();
+        assertThat(travelPlan.getConfirmedAt()).isNotNull();
+        assertThat(response.confirmedAt()).isEqualTo(travelPlan.getConfirmedAt());
+    }
+
+    @Test
+    void rejects_confirming_travel_before_generation_completed() {
+        TravelPlan travelPlan = travelPlan();
+        when(travelPlanRepository.findByIdAndUserId(10L, 1L)).thenReturn(Optional.of(travelPlan));
+
+        assertThatThrownBy(() -> travelPlanService.confirmTravel(1L, 10L))
+                .isInstanceOfSatisfying(BusinessException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_FAILED)
+                );
+
+        assertThat(travelPlan.isConfirmed()).isFalse();
+    }
+
     private TravelPlanRequest validRequest() {
         LocalDateTime arrival = LocalDateTime.now().plusDays(1);
         TravelPreferenceRequest preference = new TravelPreferenceRequest(
@@ -84,6 +113,18 @@ class TravelPlanServiceTest {
                 CompanionType.FRIEND,
                 preference,
                 List.of()
+        );
+    }
+
+    private TravelPlan travelPlan() {
+        LocalDateTime arrival = LocalDateTime.now().plusDays(1);
+        return TravelPlan.create(
+                1L,
+                Region.create("강남구", "서울특별시 강남구"),
+                arrival,
+                arrival.plusDays(2),
+                2,
+                CompanionType.FRIEND
         );
     }
 }
