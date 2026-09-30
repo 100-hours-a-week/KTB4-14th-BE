@@ -21,6 +21,7 @@ import com.audigo.domain.travel.repository.TravelPlanRepository;
 import com.audigo.domain.travel.repository.TravelGenerationJobRepository;
 import com.audigo.global.error.BusinessException;
 import com.audigo.global.error.ErrorCode;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.HashSet;
 import java.util.List;
@@ -60,10 +61,10 @@ public class TravelPlanService {
     @Transactional(readOnly = true)
     public TravelSummaryResponse getUpcomingTravel(Long userId) {
         return travelPlanRepository
-                .findTopByUserIdAndStatusAndDepartureDatetimeGreaterThanEqualOrderByArrivalDatetimeAsc(
+                .findTopByUserIdAndStatusAndConfirmedAtIsNotNullAndArrivalDatetimeGreaterThanEqualOrderByArrivalDatetimeAsc(
                         userId,
                         TravelPlanStatus.COMPLETED,
-                        LocalDateTime.now()
+                        LocalDate.now().atStartOfDay()
                 )
                 .map(TravelSummaryResponse::from)
                 .orElse(null);
