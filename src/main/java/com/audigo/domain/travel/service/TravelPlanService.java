@@ -73,7 +73,7 @@ public class TravelPlanService {
     @Transactional(readOnly = true)
     public List<TravelSummaryResponse> getRecentTravels(Long userId) {
         return travelPlanRepository
-                .findTop5ByUserIdAndStatusAndDepartureDatetimeLessThanOrderByDepartureDatetimeDesc(
+                .findTop5ByUserIdAndStatusAndConfirmedAtIsNotNullAndDepartureDatetimeLessThanOrderByDepartureDatetimeDesc(
                         userId,
                         TravelPlanStatus.COMPLETED,
                         LocalDateTime.now()
