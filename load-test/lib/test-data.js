@@ -22,6 +22,20 @@ export function currentUser({ unique = false } = {}) {
     return testData[(__VU - 1) % testData.length];
 }
 
+// 쓰기 테스트에서는 VU가 재사용되어도 각 iteration이 서로 다른 항목을 사용해야 한다.
+// iterationInTest는 시나리오 전체에서 증가하므로 한 실행 내 중복 완료 처리를 막는다.
+export function userForIteration(iterationInTest, { unique = false } = {}) {
+    if (!Number.isSafeInteger(iterationInTest) || iterationInTest < 0) {
+        throw new Error(`Invalid scenario iteration index: ${iterationInTest}`);
+    }
+    if (unique && iterationInTest >= testData.length) {
+        throw new Error(
+            `Scenario iteration ${iterationInTest + 1} needs another unique user, but only ${testData.length} are configured`
+        );
+    }
+    return testData[iterationInTest % testData.length];
+}
+
 export function requireField(user, field) {
     if (user[field] === undefined || user[field] === null || user[field] === '') {
         throw new Error(`Test user ${user.userId || __VU} is missing ${field}`);

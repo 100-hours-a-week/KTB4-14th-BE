@@ -7,6 +7,10 @@ shift
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+# 명령 앞에서 지정한 실행 ID는 .env의 빈 기본값보다 우선한다. P-02처럼 여러
+# 시나리오를 같은 실행 ID로 동시에 실행할 때 결과와 서버 로그를 묶기 위함이다.
+CALLER_TEST_RUN_ID="${TEST_RUN_ID:-}"
+
 if [[ ! -f "$SCRIPT" ]]; then
   echo "Scenario file not found: $SCRIPT" >&2
   exit 1
@@ -25,11 +29,30 @@ if [[ -f .env ]]; then
   set +a
 fi
 
-export TEST_RUN_ID="${TEST_RUN_ID:-loadtest-$(date -u +%Y%m%dT%H%M%SZ)}"
+if [[ -n "$CALLER_TEST_RUN_ID" ]]; then
+  export TEST_RUN_ID="$CALLER_TEST_RUN_ID"
+fi
+
+export TEST_RUN_ID="${TEST_RUN_ID:-$(TZ=Asia/Seoul date +%Y-%m-%d-%H-%M)}"
+if [[ ! "$TEST_RUN_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "TEST_RUN_ID may contain only letters, numbers, dot, underscore, and hyphen: $TEST_RUN_ID" >&2
+  exit 1
+fi
+
 SCENARIO_NAME="$(basename "$SCRIPT" .js)"
 RESULT_DIR="results/$TEST_RUN_ID"
 SUMMARY_FILE="$RESULT_DIR/${SCENARIO_NAME}-summary.json"
 mkdir -p "$RESULT_DIR"
+
+# 같은 분에 같은 시나리오를 여러 번 실행해도 기존 결과를 덮어쓰지 않는다.
+# 첫 파일은 <scenario>-summary.json, 이후 파일은 -2, -3 순서로 저장한다.
+if [[ -e "$SUMMARY_FILE" ]]; then
+  sequence=2
+  while [[ -e "$RESULT_DIR/${SCENARIO_NAME}-summary-${sequence}.json" ]]; do
+    ((sequence += 1))
+  done
+  SUMMARY_FILE="$RESULT_DIR/${SCENARIO_NAME}-summary-${sequence}.json"
+fi
 
 echo "run_id=$TEST_RUN_ID"
 echo "scenario=$SCRIPT"

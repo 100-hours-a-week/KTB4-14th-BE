@@ -89,7 +89,7 @@ export default function () {
         const itemId = requireField(user, 'itineraryItemId');
         group('LT-02 smoke completion', () => {
             checkApiResponse(
-                patch(`/api/itinerary-items/${itemId}/completion`, { isCompleted: true }, 'LT-02', token, 'completion'),
+                patch(`/api/itinerary-items/${itemId}/completion`, { is_completed: true }, 'LT-02', token, 'completion'),
                 200
             );
             checkApiResponse(

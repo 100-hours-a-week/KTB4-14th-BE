@@ -1,11 +1,15 @@
 import { group } from 'k6';
+import exec from 'k6/execution';
+import { Counter } from 'k6/metrics';
 
 import { get, patch } from '../lib/api.js';
 import { checkApiResponse } from '../lib/checks.js';
 import { arrivalRate, duration, requireWriteConfirmation, vus } from '../lib/profile.js';
-import { currentUser, requireField } from '../lib/test-data.js';
+import { requireField, userForIteration } from '../lib/test-data.js';
 
 requireWriteConfirmation();
+
+const completionAttempts = new Counter('completion_attempts');
 
 export const options = {
     scenarios: {
@@ -20,16 +24,17 @@ export const options = {
     },
 };
 
-// LT-02: 동일 일정 항목을 동시에 갱신하지 않도록 VU마다 전용 계정/항목을 쓴다.
+// LT-02: VU 재사용 여부와 관계없이 각 iteration에 서로 다른 계정/항목을 배정한다.
 export default function () {
-    const user = currentUser({ unique: true });
+    const user = userForIteration(exec.scenario.iterationInTest, { unique: true });
     const token = requireField(user, 'accessToken');
     const itemId = requireField(user, 'itineraryItemId');
     const travelPlanId = requireField(user, 'travelPlanId');
 
+    completionAttempts.add(1);
     group('LT-02 completion and reread', () => {
         checkApiResponse(
-            patch(`/api/itinerary-items/${itemId}/completion`, { isCompleted: true }, 'LT-02', token, 'completion'),
+            patch(`/api/itinerary-items/${itemId}/completion`, { is_completed: true }, 'LT-02', token, 'completion'),
             200
         );
         checkApiResponse(

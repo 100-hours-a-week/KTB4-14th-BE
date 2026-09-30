@@ -6,7 +6,7 @@
   "companion_type": "SOLO",
   "preference": {
     "pace_type": "BALANCED",
-    "transport_type": "PUBLIC_TRANSPORT",
+    "transport_type": "CAR",
     "budget_min": 100000,
     "budget_max": 200000,
     "budget_type": "KRW",

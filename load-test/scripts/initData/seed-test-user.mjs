@@ -14,7 +14,7 @@ function usage(message) {
         'Usage: CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true CONFIRM_AI_MOCK=true '
         + 'node scripts/seed-test-user.mjs --user-id <id> '
         + '[--data data/test-ids.json] [--request data/create-request.json] '
-        + '[--timeout-seconds 300] [--poll-interval-seconds 1] [--replace]'
+        + '[--timeout-seconds 300] [--poll-interval-seconds 1] [--replace | --no-record]'
     );
     process.exit(1);
 }
@@ -32,6 +32,7 @@ function readArguments(argumentsList) {
         data: resolve(ROOT_DIR, 'data/test-ids.json'),
         request: resolve(ROOT_DIR, 'data/create-request.json'),
         pollIntervalSeconds: DEFAULT_POLL_INTERVAL_SECONDS,
+        record: true,
         replace: false,
         timeoutSeconds: DEFAULT_TIMEOUT_SECONDS,
         userId: null,
@@ -59,6 +60,8 @@ function readArguments(argumentsList) {
             index += 1;
         } else if (argument === '--replace') {
             options.replace = true;
+        } else if (argument === '--no-record') {
+            options.record = false;
         } else if (argument === '--help' || argument === '-h') {
             usage();
         } else {
@@ -67,6 +70,9 @@ function readArguments(argumentsList) {
     }
 
     if (!options.userId) usage('--user-id is required');
+    if (options.replace && !options.record) {
+        usage('--replace and --no-record cannot be used together');
+    }
     return options;
 }
 
@@ -207,7 +213,7 @@ async function main() {
     const creationRequest = readJson(options.request, 'creation request');
     const user = findUser(testData, options.userId);
 
-    if (hasExistingSeed(user) && !options.replace) {
+    if (options.record && hasExistingSeed(user) && !options.replace) {
         usage(
             `userId ${options.userId} already has test resource IDs; use --replace only to intentionally create another travel plan`
         );
@@ -255,17 +261,24 @@ async function main() {
     );
     const itineraryItemId = selectedIncompleteItem(itinerary);
 
-    const updatedData = {
-        ...testData,
-        users: testData.users.map((entry) => entry.userId === options.userId
-            ? { ...entry, travelPlanId, generationJobId, itineraryItemId }
-            : entry),
-    };
-    writeAtomically(options.data, updatedData);
+    if (options.record) {
+        const updatedData = {
+            ...testData,
+            users: testData.users.map((entry) => entry.userId === options.userId
+                ? { ...entry, travelPlanId, generationJobId, itineraryItemId }
+                : entry),
+        };
+        writeAtomically(options.data, updatedData);
 
-    console.log(`Seeded userId ${options.userId}.`);
-    console.log(`Recorded travelPlanId=${travelPlanId}, generationJobId=${generationJobId}, itineraryItemId=${itineraryItemId}.`);
-    console.log(`Updated: ${options.data}`);
+        console.log(`Seeded userId ${options.userId}.`);
+        console.log(`Recorded travelPlanId=${travelPlanId}, generationJobId=${generationJobId}, itineraryItemId=${itineraryItemId}.`);
+        console.log(`Updated: ${options.data}`);
+        return;
+    }
+
+    console.log(`Created an unrecorded completed travel for userId ${options.userId}.`);
+    console.log(`travelPlanId=${travelPlanId}, generationJobId=${generationJobId}, itineraryItemId=${itineraryItemId}.`);
+    console.log('test-ids.json was not changed. Use this travelPlanId only for Staging-only past-travel preparation.');
 }
 
 main().catch((error) => {
