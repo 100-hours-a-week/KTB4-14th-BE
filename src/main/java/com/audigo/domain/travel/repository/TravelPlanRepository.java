@@ -43,7 +43,19 @@ public interface TravelPlanRepository extends JpaRepository<TravelPlan, Long> {
             LocalDateTime now
     );
 
+    long countByUserIdAndStatusAndConfirmedAtIsNotNullAndDepartureDatetimeLessThan(
+            Long userId,
+            TravelPlanStatus status,
+            LocalDateTime now
+    );
+
     long countByUserIdAndStatusAndDepartureDatetimeGreaterThanEqual(
+            Long userId,
+            TravelPlanStatus status,
+            LocalDateTime now
+    );
+
+    long countByUserIdAndStatusAndConfirmedAtIsNotNullAndDepartureDatetimeGreaterThanEqual(
             Long userId,
             TravelPlanStatus status,
             LocalDateTime now
