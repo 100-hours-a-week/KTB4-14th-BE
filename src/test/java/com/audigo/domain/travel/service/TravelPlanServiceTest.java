@@ -1,5 +1,6 @@
 package com.audigo.domain.travel.service;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.never;
@@ -64,6 +65,25 @@ class TravelPlanServiceTest {
 
         verify(regionRepository, never()).findById(1L);
         verify(travelPlanRepository, never()).save(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void finds_upcoming_travel_from_confirmed_completed_plans() {
+        TravelPlan travelPlan = travelPlan();
+        travelPlan.markCompleted();
+        travelPlan.confirm(LocalDateTime.now());
+        when(travelPlanRepository
+                .findTopByUserIdAndStatusAndConfirmedAtIsNotNullAndArrivalDatetimeGreaterThanEqualOrderByArrivalDatetimeAsc(
+                        org.mockito.ArgumentMatchers.eq(1L),
+                        org.mockito.ArgumentMatchers.eq(TravelPlanStatus.COMPLETED),
+                        any(LocalDateTime.class)
+                )).thenReturn(Optional.of(travelPlan));
+
+        var response = travelPlanService.getUpcomingTravel(1L);
+
+        assertThat(response).isNotNull();
+        assertThat(response.status()).isEqualTo(TravelPlanStatus.COMPLETED);
+        assertThat(response.confirmedAt()).isEqualTo(travelPlan.getConfirmedAt());
     }
 
     @Test
