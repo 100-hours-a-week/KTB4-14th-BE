@@ -1,0 +1,19 @@
+{
+  "region_id": 1,
+  "arrival_datetime": "2030-05-01T10:00:00",
+  "departure_datetime": "2030-05-02T18:00:00",
+  "headcount": 1,
+  "companion_type": "SOLO",
+  "preference": {
+    "pace_type": "BALANCED",
+    "transport_type": "PUBLIC_TRANSPORT",
+    "budget_min": 100000,
+    "budget_max": 200000,
+    "budget_type": "KRW",
+    "distance_preference": 50,
+    "themes": ["CULTURE"],
+    "foods": ["KOREAN"],
+    "extra_request": "loadtest-smoke"
+  },
+  "required_places": []
+}

@@ -3,6 +3,7 @@
 
 # Real test data
 data/test-ids.json
+data/create-request.json
 
 # Load test results
 results/*

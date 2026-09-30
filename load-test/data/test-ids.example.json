@@ -1,0 +1,11 @@
+{
+  "users": [
+    {
+      "userId": 10001,
+      "accessToken": "TEST_ACCESS_TOKEN",
+      "travelPlanId": 1001,
+      "itineraryItemId": 5001,
+      "generationJobId": 9001
+    }
+  ]
+}
