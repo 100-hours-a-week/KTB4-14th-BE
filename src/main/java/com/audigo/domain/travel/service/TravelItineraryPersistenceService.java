@@ -172,7 +172,7 @@ public class TravelItineraryPersistenceService {
             dayIndex++;
         }
 
-        for (TravelPlanPlace required : plan.getRequiredPlaces()) {
+        for (TravelPlanPlace required : plan.getUserRequiredPlaces()) {
             if (!usedPlanPlaceIds.contains(required.getId())) {
                 throw new IllegalArgumentException("AI 일정에 필수 장소가 포함되지 않았습니다.");
             }
@@ -277,7 +277,7 @@ public class TravelItineraryPersistenceService {
     private ArrayNode fallbackDaysFromRequiredPlaces(JsonNode result, TravelPlan plan) {
         JsonNode routeSegments = result == null ? null : first(result, "route_segments", "routes");
         if (routeSegments == null || !routeSegments.isArray() || routeSegments.isEmpty()
-                || plan.getRequiredPlaces().isEmpty()) {
+                || plan.getUserRequiredPlaces().isEmpty()) {
             return null;
         }
         for (JsonNode route : routeSegments) {
@@ -291,7 +291,7 @@ public class TravelItineraryPersistenceService {
         day.put("date", plan.getArrivalDatetime().toLocalDate().toString());
         ArrayNode stops = day.putArray("stops");
         int sequence = 1;
-        for (TravelPlanPlace requiredPlace : plan.getRequiredPlaces()) {
+        for (TravelPlanPlace requiredPlace : plan.getUserRequiredPlaces()) {
             ObjectNode stop = stops.addObject();
             stop.put("provider", requiredPlace.getPlace().getProvider().name());
             stop.put("provider_place_id", requiredPlace.getPlace().getProviderPlaceId());

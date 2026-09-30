@@ -88,10 +88,11 @@ public class TravelPlanController {
     @PostMapping({"/{travelPlanId}/regenerate", "/{travelPlanId}/regeneration"})
     @ResponseStatus(HttpStatus.ACCEPTED)
     public ApiResponse<TravelPlanCreatedResponse> regenerate(
-            @PathVariable Long travelPlanId
+            @PathVariable Long travelPlanId,
+            @Valid @RequestBody(required = false) TravelPlanRequest request
     ) {
         TravelPlan travelPlan = travelPlanService.regenerateTravelPlan(currentUser.id(), travelPlanId);
-        Long generationJobId = generationOrchestrator.schedule(currentUser.id(), travelPlanId, null);
+        Long generationJobId = generationOrchestrator.schedule(currentUser.id(), travelPlanId, request);
         return ApiResponse.of(
                 "여행 재생성 요청",
                 TravelPlanCreatedResponse.from(travelPlan, generationJobId)
