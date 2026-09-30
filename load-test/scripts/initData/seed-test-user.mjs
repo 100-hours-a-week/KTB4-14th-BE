@@ -2,7 +2,7 @@
 import { chmodSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-const ROOT_DIR = resolve(import.meta.dirname, '..');
+const ROOT_DIR = resolve(import.meta.dirname, '../..');
 const DEFAULT_TIMEOUT_SECONDS = 300;
 const DEFAULT_POLL_INTERVAL_SECONDS = 1;
 
@@ -12,7 +12,7 @@ function usage(message) {
     }
     console.error(
         'Usage: CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true CONFIRM_AI_MOCK=true '
-        + 'node scripts/seed-test-user.mjs --user-id <id> '
+        + 'node scripts/initData/seed-test-user.mjs --user-id <id> '
         + '[--data data/test-ids.json] [--request data/create-request.json] '
         + '[--timeout-seconds 300] [--poll-interval-seconds 1] [--replace | --no-record]'
     );

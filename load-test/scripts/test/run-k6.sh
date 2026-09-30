@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-SCRIPT="${1:?Usage: ./scripts/run-k6.sh scenarios/<scenario>.js [k6 options]}"
+SCRIPT="${1:?Usage: ./scripts/test/run-k6.sh scenarios/<scenario>.js [k6 options]}"
 shift
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT_DIR"
 
 # 명령 앞에서 지정한 실행 ID는 .env의 빈 기본값보다 우선한다. P-02처럼 여러

@@ -2,12 +2,12 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-const ROOT_DIR = resolve(import.meta.dirname, '..');
+const ROOT_DIR = resolve(import.meta.dirname, '../..');
 
 function usage(message) {
     if (message) console.error(`Error: ${message}`);
     console.error(
-        'Usage: node scripts/validate-test-data.mjs '
+        'Usage: node scripts/test/validate-test-data.mjs '
         + '[--data data/test-ids.json] [--expected-count 150] [--min-token-ttl-seconds 1800]'
     );
     process.exit(1);

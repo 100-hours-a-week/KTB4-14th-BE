@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT_DIR"
 
 CALLER_TEST_RUN_ID="${TEST_RUN_ID:-}"
@@ -94,14 +94,14 @@ cleanup_on_exit() {
 trap cleanup_on_exit EXIT INT TERM
 
 assert_standard() {
-  node scripts/assert-k6-summary.mjs --summary "$1"
+  node scripts/test/assert-k6-summary.mjs --summary "$1"
 }
 
 echo "=== Audigo baseline suite ==="
 echo "run_id=$TEST_RUN_ID"
 echo "result_dir=$RESULT_DIR"
 
-node scripts/validate-test-data.mjs --min-token-ttl-seconds 1800
+node scripts/test/validate-test-data.mjs --min-token-ttl-seconds 1800
 
 if [[ "$BASE_URL" == "https://api.audigo.kr" || "$BASE_URL" == "https://api.audigo.kr/" ]]; then
   echo "Production BASE_URL is blocked" >&2
@@ -111,15 +111,15 @@ curl --fail --silent --show-error --max-time 10 "${BASE_URL%/}/health" >/dev/nul
 echo "Staging health check passed."
 
 echo "=== 1/5 read smoke ==="
-./scripts/run-k6.sh scenarios/smoke.js
+./scripts/test/run-k6.sh scenarios/smoke.js
 assert_standard "$RESULT_DIR/smoke-summary.json"
 
 echo "=== 2/5 LT-01 itinerary read baseline ==="
-./scripts/run-k6.sh scenarios/itinerary-read.js
+./scripts/test/run-k6.sh scenarios/itinerary-read.js
 assert_standard "$RESULT_DIR/itinerary-read-summary.json"
 
 echo "=== 3/5 LT-05 generation polling baseline ==="
-./scripts/run-k6.sh scenarios/generation-polling.js
+./scripts/test/run-k6.sh scenarios/generation-polling.js
 assert_standard "$RESULT_DIR/generation-polling-summary.json"
 
 echo "=== Preparing LT-02 completion data ==="
@@ -130,7 +130,7 @@ echo "=== 4/5 LT-02 completion baseline ==="
 completion_cleanup_required=true
 completion_exit=0
 CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true \
-  ./scripts/run-k6.sh scenarios/completion.js || completion_exit=$?
+  ./scripts/test/run-k6.sh scenarios/completion.js || completion_exit=$?
 
 COMPLETION_SUMMARY="$RESULT_DIR/completion-summary.json"
 if [[ -f "$COMPLETION_SUMMARY" ]]; then
@@ -149,8 +149,8 @@ fi
 assert_standard "$COMPLETION_SUMMARY"
 
 echo "=== 5/5 LT-06 SSE baseline ==="
-./scripts/run-k6.sh scenarios/sse.js
-node scripts/assert-k6-summary.mjs \
+./scripts/test/run-k6.sh scenarios/sse.js
+node scripts/test/assert-k6-summary.mjs \
   --summary "$RESULT_DIR/sse-summary.json" \
   --mode sse \
   --min-sse-attempts "$SSE_CONNECTIONS"

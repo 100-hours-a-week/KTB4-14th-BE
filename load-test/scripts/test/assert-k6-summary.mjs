@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 function usage(message) {
     if (message) console.error(`Error: ${message}`);
     console.error(
-        'Usage: node scripts/assert-k6-summary.mjs --summary <file> '
+        'Usage: node scripts/test/assert-k6-summary.mjs --summary <file> '
         + '[--mode standard|sse] [--min-sse-attempts 1]'
     );
     process.exit(1);

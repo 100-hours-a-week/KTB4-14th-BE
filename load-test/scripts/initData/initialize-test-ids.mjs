@@ -2,12 +2,12 @@
 import { chmodSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-const ROOT_DIR = resolve(import.meta.dirname, '..');
+const ROOT_DIR = resolve(import.meta.dirname, '../..');
 
 function usage(message) {
     if (message) console.error(`Error: ${message}`);
     console.error(
-        'Usage: node scripts/initialize-test-ids.mjs '
+        'Usage: node scripts/initData/initialize-test-ids.mjs '
         + '[--ids-file data/loadtest-user-ids.txt] '
         + '[--output data/test-ids.json] [--expected-count 150] [--force]'
     );

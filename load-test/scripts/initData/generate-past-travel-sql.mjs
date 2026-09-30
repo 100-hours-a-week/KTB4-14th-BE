@@ -2,13 +2,13 @@
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
-const ROOT_DIR = resolve(import.meta.dirname, '..');
+const ROOT_DIR = resolve(import.meta.dirname, '../..');
 const MYSQL_DATETIME = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 
 function usage(message) {
     if (message) console.error(`Error: ${message}`);
     console.error(
-        'Usage: node scripts/generate-past-travel-sql.mjs '
+        'Usage: node scripts/initData/generate-past-travel-sql.mjs '
         + '--arrival "YYYY-MM-DD HH:mm:ss" --departure "YYYY-MM-DD HH:mm:ss" '
         + '[--data data/test-ids.json] '
         + '[--user-id <id> | --from-index 1 [--to-index 150]] '

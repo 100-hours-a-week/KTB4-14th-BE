@@ -4,14 +4,14 @@ import { chmodSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const DEFAULT_TTL_SECONDS = 86_400;
-const ROOT_DIR = resolve(import.meta.dirname, '..');
+const ROOT_DIR = resolve(import.meta.dirname, '../..');
 
 function usage(message) {
     if (message) {
         console.error(`Error: ${message}`);
     }
     console.error(
-        'Usage: STAGING_JWT_SECRET=... node scripts/generate-test-tokens.mjs '
+        'Usage: STAGING_JWT_SECRET=... node scripts/initData/generate-test-tokens.mjs '
         + '[--input data/test-ids.json] [--output data/test-ids.json] [--ttl 86400]'
     );
     process.exit(1);
