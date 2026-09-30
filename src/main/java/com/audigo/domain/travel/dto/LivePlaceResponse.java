@@ -1,6 +1,7 @@
 package com.audigo.domain.travel.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import java.math.BigDecimal;
 
 public record LivePlaceResponse(
         String provider,
@@ -10,6 +11,12 @@ public record LivePlaceResponse(
 
         @JsonProperty("place_name")
         String placeName,
+
+        @JsonProperty("latitude")
+        BigDecimal latitude,
+
+        @JsonProperty("longitude")
+        BigDecimal longitude,
 
         @JsonProperty("place_url")
         String placeUrl
