@@ -4,7 +4,7 @@ import com.audigo.domain.travel.dto.BusArrivalLookupResponse;
 import com.audigo.domain.travel.entity.RouteSegment;
 import com.audigo.domain.travel.repository.RouteSegmentRepository;
 import com.audigo.domain.travel.repository.TravelPlanRepository;
-import com.audigo.domain.travel.service.BusArrivalRealtimeService;
+import com.audigo.domain.travel.service.BusArrivalQueryService;
 import com.audigo.global.error.BusinessException;
 import com.audigo.global.error.ErrorCode;
 import com.audigo.global.response.ApiResponse;
@@ -25,18 +25,18 @@ public class BusArrivalController {
     private final CurrentUser currentUser;
     private final TravelPlanRepository travelPlanRepository;
     private final RouteSegmentRepository routeSegmentRepository;
-    private final BusArrivalRealtimeService busArrivalRealtimeService;
+    private final BusArrivalQueryService busArrivalQueryService;
 
     public BusArrivalController(
             CurrentUser currentUser,
             TravelPlanRepository travelPlanRepository,
             RouteSegmentRepository routeSegmentRepository,
-            BusArrivalRealtimeService busArrivalRealtimeService
+            BusArrivalQueryService busArrivalQueryService
     ) {
         this.currentUser = currentUser;
         this.travelPlanRepository = travelPlanRepository;
         this.routeSegmentRepository = routeSegmentRepository;
-        this.busArrivalRealtimeService = busArrivalRealtimeService;
+        this.busArrivalQueryService = busArrivalQueryService;
     }
 
     @Transactional(readOnly = true)
@@ -56,7 +56,7 @@ public class BusArrivalController {
 
         return ApiResponse.of(
                 "버스 도착정보 조회",
-                busArrivalRealtimeService.findForRoute(
+                busArrivalQueryService.findForRoute(
                         route,
                         cityCode,
                         nodeId,
