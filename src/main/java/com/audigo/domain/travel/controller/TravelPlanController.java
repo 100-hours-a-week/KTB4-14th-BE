@@ -14,6 +14,7 @@ import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -72,6 +73,16 @@ public class TravelPlanController {
         return ApiResponse.of(
                 "my_travels_found",
                 travelPlanService.getMyTravels(currentUser.id())
+        );
+    }
+
+    @PatchMapping("/{travelPlanId}/confirm")
+    public ApiResponse<TravelSummaryResponse> confirmTravel(
+            @PathVariable Long travelPlanId
+    ) {
+        return ApiResponse.of(
+                "travel_confirmed",
+                travelPlanService.confirmTravel(currentUser.id(), travelPlanId)
         );
     }
 

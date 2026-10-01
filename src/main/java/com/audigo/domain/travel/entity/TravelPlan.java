@@ -38,6 +38,9 @@ public class TravelPlan {
     @Column(name = "status", nullable = false, length = 30)
     private TravelPlanStatus status;
 
+    @Column(name = "confirmed_at")
+    private LocalDateTime confirmedAt;
+
     @OneToOne(mappedBy = "travelPlan", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     private TravelPreference preference;
 
@@ -169,6 +172,26 @@ public class TravelPlan {
 
     public TravelPlanStatus getStatus(){
         return status;
+    }
+
+    public LocalDateTime getConfirmedAt() {
+        return confirmedAt;
+    }
+
+    public boolean isConfirmed() {
+        return confirmedAt != null;
+    }
+
+    public void confirm(LocalDateTime confirmedAt) {
+        if (confirmedAt == null) {
+            throw new IllegalArgumentException("확정 시간은 필수입니다.");
+        }
+        if (this.status != TravelPlanStatus.COMPLETED) {
+            throw new IllegalStateException("생성이 완료된 여행만 확정할 수 있습니다.");
+        }
+        if (this.confirmedAt == null) {
+            this.confirmedAt = confirmedAt;
+        }
     }
 
     public void markCompleted() {

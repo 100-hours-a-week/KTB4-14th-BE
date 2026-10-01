@@ -21,6 +21,7 @@ import com.audigo.domain.travel.repository.TravelPlanRepository;
 import com.audigo.domain.travel.repository.TravelGenerationJobRepository;
 import com.audigo.global.error.BusinessException;
 import com.audigo.global.error.ErrorCode;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.HashSet;
 import java.util.List;
@@ -60,10 +61,10 @@ public class TravelPlanService {
     @Transactional(readOnly = true)
     public TravelSummaryResponse getUpcomingTravel(Long userId) {
         return travelPlanRepository
-                .findTopByUserIdAndStatusAndDepartureDatetimeGreaterThanEqualOrderByArrivalDatetimeAsc(
+                .findTopByUserIdAndStatusAndConfirmedAtIsNotNullAndArrivalDatetimeGreaterThanEqualOrderByArrivalDatetimeAsc(
                         userId,
                         TravelPlanStatus.COMPLETED,
-                        LocalDateTime.now()
+                        LocalDate.now().atStartOfDay()
                 )
                 .map(TravelSummaryResponse::from)
                 .orElse(null);
@@ -72,7 +73,7 @@ public class TravelPlanService {
     @Transactional(readOnly = true)
     public List<TravelSummaryResponse> getRecentTravels(Long userId) {
         return travelPlanRepository
-                .findTop5ByUserIdAndStatusAndDepartureDatetimeLessThanOrderByDepartureDatetimeDesc(
+                .findTop5ByUserIdAndStatusAndConfirmedAtIsNotNullAndDepartureDatetimeLessThanOrderByDepartureDatetimeDesc(
                         userId,
                         TravelPlanStatus.COMPLETED,
                         LocalDateTime.now()
@@ -87,6 +88,17 @@ public class TravelPlanService {
         return travelPlanRepository.findAllByUserIdOrderByCreatedAtDesc(userId).stream()
                 .map(TravelSummaryResponse::from)
                 .toList();
+    }
+
+    @Transactional
+    public TravelSummaryResponse confirmTravel(Long userId, Long travelPlanId) {
+        TravelPlan travelPlan = travelPlanRepository.findByIdAndUserId(travelPlanId, userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.VALIDATION_FAILED));
+        if (travelPlan.getStatus() != TravelPlanStatus.COMPLETED) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED);
+        }
+        travelPlan.confirm(LocalDateTime.now());
+        return TravelSummaryResponse.from(travelPlan);
     }
 
     // 여행 생성하기 요청(1단계)

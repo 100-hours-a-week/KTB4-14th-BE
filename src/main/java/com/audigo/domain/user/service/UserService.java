@@ -27,12 +27,12 @@ public class UserService {
     public MyPageResponse getMyPage(Long userId) {
         User user = findUser(userId);
         LocalDateTime now = LocalDateTime.now();
-        long completedTravelCount = travelPlanRepository.countByUserIdAndStatusAndDepartureDatetimeLessThan(
+        long completedTravelCount = travelPlanRepository.countByUserIdAndStatusAndConfirmedAtIsNotNullAndDepartureDatetimeLessThan(
                 userId,
                 TravelPlanStatus.COMPLETED,
                 now
         );
-        long upcomingTravelCount = travelPlanRepository.countByUserIdAndStatusAndDepartureDatetimeGreaterThanEqual(
+        long upcomingTravelCount = travelPlanRepository.countByUserIdAndStatusAndConfirmedAtIsNotNullAndDepartureDatetimeGreaterThanEqual(
                 userId,
                 TravelPlanStatus.COMPLETED,
                 now
