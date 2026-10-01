@@ -11,10 +11,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
-import java.util.Comparator;
 import java.util.List;
-import java.util.Locale;
-import java.util.Map;
 
 public record ItineraryResponse(
         @JsonProperty("travel_plan_id") Long travelPlanId,
@@ -120,11 +117,8 @@ public record ItineraryResponse(
             @JsonProperty("estimated_departure_at") LocalDateTime estimatedDepartureAt,
             @JsonProperty("estimated_arrival_at") LocalDateTime estimatedArrivalAt,
             @JsonProperty("realtime") boolean realtime,
-            @JsonProperty("last_refreshed_at") LocalDateTime lastRefreshedAt,
-            @JsonProperty("realtime_message") String realtimeMessage
+            @JsonProperty("last_refreshed_at") LocalDateTime lastRefreshedAt
     ) {
-        private static final String REALTIME_UNAVAILABLE_MESSAGE = "실시간 버스 도착 서비스 제공이 불가능한 지역입니다";
-
         public RouteSegmentResponse {
             legs = legs == null ? List.of() : List.copyOf(legs);
         }
@@ -133,56 +127,6 @@ public record ItineraryResponse(
                 RouteSegment route,
                 TravelItineraryMetadataStore.RouteMetadata metadata
         ) {
-            // 경로 재계산 응답은 TAGO 조회를 수행하지 않으므로
-            // BUS 경로를 실시간 조회 실패로 간주하지 않는다.
-            return from(route, metadata, Map.of(), false);
-        }
-
-        public static RouteSegmentResponse from(
-                RouteSegment route,
-                TravelItineraryMetadataStore.RouteMetadata metadata,
-                Map<Integer, BusArrivalResponse> busArrivalsByLegSequence
-        ) {
-            return from(route, metadata, busArrivalsByLegSequence, true);
-        }
-
-        private static RouteSegmentResponse from(
-                RouteSegment route,
-                TravelItineraryMetadataStore.RouteMetadata metadata,
-                Map<Integer, BusArrivalResponse> busArrivalsByLegSequence,
-                boolean reportRealtimeUnavailable
-        ) {
-            Map<Integer, BusArrivalResponse> resolvedArrivals = busArrivalsByLegSequence == null
-                    ? Map.of()
-                    : busArrivalsByLegSequence;
-            BusArrivalResponse representativeArrival = resolvedArrivals.values().stream()
-                    .filter(java.util.Objects::nonNull)
-                    .min(Comparator.comparing(
-                                    BusArrivalResponse::nextArrivalMinutes,
-                                    Comparator.nullsLast(Comparator.naturalOrder())
-                            )
-                            .thenComparingInt(BusArrivalResponse::legSequence))
-                    .orElse(null);
-            String lineName = metadata == null ? null : metadata.lineName();
-            if (lineName == null && representativeArrival != null) {
-                lineName = representativeArrival.routeNumber();
-            }
-            boolean hasBusLeg = route.getLegs().stream()
-                    .anyMatch(leg -> isBusMode(leg.getMode()));
-            Integer nextArrivalMinutes = representativeArrival == null
-                    ? hasBusLeg ? null : metadata == null ? null : metadata.nextArrivalMinutes()
-                    : representativeArrival.nextArrivalMinutes();
-            boolean realtime = hasBusLeg
-                    ? representativeArrival != null
-                    : metadata != null && metadata.realtime();
-            LocalDateTime lastRefreshedAt = representativeArrival == null
-                    ? hasBusLeg ? null : metadata == null ? null : metadata.lastRefreshedAt()
-                    : representativeArrival.fetchedAt();
-            // 경로에 BUS leg가 여러 개일 때 하나라도 정상 조회되면 경로 전체는 제공 가능 상태다.
-            // 조회에 성공한 leg가 하나도 없을 때만 토스트용 메시지를 내려보낸다.
-            boolean shouldReportRealtimeUnavailable = reportRealtimeUnavailable
-                    && hasBusLeg
-                    && representativeArrival == null;
             return new RouteSegmentResponse(
                     route.getId(),
                     route.getFromItineraryItem().getId(),
@@ -192,29 +136,15 @@ public record ItineraryResponse(
                     route.getDistanceMeter(),
                     route.getTotalFareAmount(),
                     route.getOrder(),
-                    route.getLegs().stream()
-                            .map(leg -> RouteLegResponse.from(
-                                    leg, resolvedArrivals.get(leg.getSequence())))
-                            .toList(),
-                    lineName,
+                    route.getLegs().stream().map(RouteLegResponse::from).toList(),
+                    metadata == null ? null : metadata.lineName(),
                     metadata == null ? null : metadata.vehicleNumber(),
-                    nextArrivalMinutes,
+                    metadata == null ? null : metadata.nextArrivalMinutes(),
                     metadata == null ? null : metadata.estimatedDepartureAt(),
                     metadata == null ? null : metadata.estimatedArrivalAt(),
-                    realtime,
-                    lastRefreshedAt,
-                    shouldReportRealtimeUnavailable ? REALTIME_UNAVAILABLE_MESSAGE : null
+                    metadata != null && metadata.realtime(),
+                    metadata == null ? null : metadata.lastRefreshedAt()
             );
-        }
-
-        private static boolean isBusMode(String mode) {
-            if (mode == null || mode.isBlank()) {
-                return false;
-            }
-            String normalized = mode.trim().toUpperCase(Locale.ROOT);
-            return "BUS".equals(normalized)
-                    || "EXPRESSBUS".equals(normalized)
-                    || "INTERCITY_BUS".equals(normalized);
         }
     }
 
@@ -226,22 +156,14 @@ public record ItineraryResponse(
             @JsonProperty("duration_minute") Integer durationMinute,
             @JsonProperty("distance_meter") Integer distanceMeter,
             @JsonProperty("bus_number") List<String> busNumbers,
-            @JsonProperty("subway_line") List<String> subwayLines,
-            @JsonProperty("realtime") boolean realtime,
-            @JsonProperty("next_arrival_minutes") Integer nextArrivalMinutes,
-            @JsonProperty("remaining_stops") Integer remainingStops,
-            @JsonProperty("expected_arrival_at") LocalDateTime expectedArrivalAt,
-            @JsonProperty("last_refreshed_at") LocalDateTime lastRefreshedAt
+            @JsonProperty("subway_line") List<String> subwayLines
     ) {
         public RouteLegResponse {
             busNumbers = busNumbers == null ? List.of() : List.copyOf(busNumbers);
             subwayLines = subwayLines == null ? List.of() : List.copyOf(subwayLines);
         }
 
-        private static RouteLegResponse from(
-                RouteSegmentLeg leg,
-                BusArrivalResponse busArrival
-        ) {
+        private static RouteLegResponse from(RouteSegmentLeg leg) {
             return new RouteLegResponse(
                     leg.getSequence(),
                     leg.getMode(),
@@ -250,12 +172,7 @@ public record ItineraryResponse(
                     leg.getDurationMinute(),
                     leg.getDistanceMeter(),
                     leg.getBusNumbers(),
-                    leg.getSubwayLines(),
-                    busArrival != null,
-                    busArrival == null ? null : busArrival.nextArrivalMinutes(),
-                    busArrival == null ? null : busArrival.remainingStops(),
-                    busArrival == null ? null : busArrival.expectedArrivalAt(),
-                    busArrival == null ? null : busArrival.fetchedAt()
+                    leg.getSubwayLines()
             );
         }
     }
