@@ -57,6 +57,15 @@ audigo:
       base-url: ${KAKAO_TRANSIT_BASE_URL:https://apis-navi.kakaomobility.com/affiliate/publictransit/v1/multimodal/directions}
       rest-api-key: ${KAKAO_REST_API_KEY:}
 
+  transit-arrival:
+    tago:
+      base-url: ${TAGO_BUS_ARRIVAL_BASE_URL:https://apis.data.go.kr/1613000/ArvlInfoInqireService/getSttnAcctoArvlPrearngeInfoList}
+      service-key: ${TAGO_SERVICE_KEY:}
+  transit-stop:
+    tago:
+      base-url: ${TAGO_BUS_STOP_BASE_URL:https://apis.data.go.kr/1613000/BusSttnInfoInqireService}
+      service-key: ${TAGO_SERVICE_KEY:}
+
   ai:
     base-url: ${AUDIGO_AI_BASE_URL:}
     sse-path: ${AUDIGO_AI_SSE_PATH:/api/ai/v1/itinerary-jobs/stream}

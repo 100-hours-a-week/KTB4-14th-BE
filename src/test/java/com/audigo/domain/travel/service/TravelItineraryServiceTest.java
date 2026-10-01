@@ -15,9 +15,12 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.audigo.domain.travel.dto.ItineraryCompletionResponse;
+import com.audigo.domain.travel.dto.ItineraryResponse;
 import com.audigo.domain.travel.entity.ItineraryDay;
 import com.audigo.domain.travel.entity.ItineraryItem;
+import com.audigo.domain.travel.entity.Region;
 import com.audigo.domain.travel.entity.RouteSegment;
+import com.audigo.domain.travel.entity.RouteSegmentLeg;
 import com.audigo.domain.travel.entity.TravelPlan;
 import com.audigo.domain.travel.entity.TravelPlanStatus;
 import com.audigo.domain.travel.entity.TravelTransportType;
@@ -26,6 +29,7 @@ import com.audigo.domain.travel.repository.ItineraryItemRepository;
 import com.audigo.domain.travel.repository.RouteSegmentRepository;
 import com.audigo.domain.travel.repository.TravelPlanRepository;
 import com.audigo.global.error.BusinessException;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
@@ -53,6 +57,12 @@ class TravelItineraryServiceTest {
 
     @Mock
     private PublicTransportRealtimeService realtimeService;
+
+    @Mock
+    private BusArrivalRealtimeService busArrivalRealtimeService;
+
+    @Mock
+    private TagoBusStopLookupService tagoBusStopLookupService;
 
     @Mock
     private KakaoPlaceSearchService kakaoPlaceSearchService;
@@ -88,30 +98,21 @@ class TravelItineraryServiceTest {
     }
 
     @Test
-    void 완료_처리하면_완료시각을_전달해_인접한_대중교통_경로만_갱신한다() {
+    void 완료_처리하면_완료상태만_저장하고_실시간_갱신은_호출하지_않는다() {
         Long itemId = 101L;
         ItineraryItem item = completedItem(itemId, false, null);
         givenOwnedCompletedItem(itemId, item);
-        when(item.getItineraryDay().getTravelPlan().getId()).thenReturn(55L);
         doAnswer(invocation -> {
             when(item.isCompleted()).thenReturn(true);
             when(item.getCompletedAt()).thenReturn(invocation.getArgument(1));
             return null;
         }).when(item).updateCompletion(anyBoolean(), any());
 
-        RouteSegment publicAdjacent = route(201L, TravelTransportType.PUBLIC_TRANSPORT, itemId, 102L);
-        RouteSegment walkAdjacent = route(202L, TravelTransportType.WALK, itemId, 103L);
-        RouteSegment publicUnrelated = route(203L, TravelTransportType.PUBLIC_TRANSPORT, 999L, 1000L);
-        when(routeRepository.findAllByTravelPlanId(55L))
-                .thenReturn(List.of(publicAdjacent, walkAdjacent, publicUnrelated));
-
         ItineraryCompletionResponse response = service.updateCompletion(7L, itemId, true);
 
         assertThat(response.completed()).isTrue();
         assertThat(response.completedAt()).isNotNull();
-        verify(realtimeService).refresh(publicAdjacent, response.completedAt());
-        verify(realtimeService, never()).refresh(walkAdjacent, response.completedAt());
-        verify(realtimeService, never()).refresh(publicUnrelated, response.completedAt());
+        verifyNoInteractions(routeRepository, realtimeService);
     }
 
     @Test
@@ -147,6 +148,64 @@ class TravelItineraryServiceTest {
         assertThatThrownBy(() -> service.getItinerary(999L, 55L))
                 .isInstanceOf(BusinessException.class);
         verifyNoInteractions(dayRepository, routeRepository, realtimeService);
+    }
+
+    @Test
+    void 일정조회는_TAGO_실시간정보를_호출하지_않고_기본값을_반환한다() {
+        TravelPlan plan = mock(TravelPlan.class);
+        Region region = mock(Region.class);
+        ItineraryDay day = mock(ItineraryDay.class);
+        RouteSegment route = mock(RouteSegment.class);
+        ItineraryItem from = mock(ItineraryItem.class);
+        ItineraryItem to = mock(ItineraryItem.class);
+        RouteSegmentLeg busLeg = mock(RouteSegmentLeg.class);
+        RouteSegmentLeg walkLeg = mock(RouteSegmentLeg.class);
+
+        when(travelPlanRepository.findByIdAndUserId(55L, 7L)).thenReturn(Optional.of(plan));
+        when(plan.getId()).thenReturn(55L);
+        when(plan.getStatus()).thenReturn(TravelPlanStatus.COMPLETED);
+        when(plan.getRegion()).thenReturn(region);
+        when(region.getFullName()).thenReturn("대전광역시 서구");
+        when(plan.getArrivalDatetime()).thenReturn(LocalDateTime.of(2026, 9, 29, 9, 0));
+        when(plan.getDepartureDatetime()).thenReturn(LocalDateTime.of(2026, 10, 1, 18, 0));
+
+        when(day.getId()).thenReturn(1L);
+        when(day.getDayNumber()).thenReturn(1);
+        when(day.getTravelDate()).thenReturn(LocalDate.of(2026, 9, 29));
+        when(dayRepository.findAllByTravelPlanIdOrderByDayNumberAsc(55L)).thenReturn(List.of(day));
+        when(itemRepository.findAllByItineraryDayIdOrderBySequenceAsc(1L)).thenReturn(List.of());
+
+        when(route.getId()).thenReturn(201L);
+        when(route.getFromItineraryItem()).thenReturn(from);
+        when(route.getToItineraryItem()).thenReturn(to);
+        when(from.getId()).thenReturn(101L);
+        when(from.getItineraryDay()).thenReturn(day);
+        when(to.getId()).thenReturn(102L);
+        when(route.getTransportType()).thenReturn(TravelTransportType.PUBLIC_TRANSPORT);
+        when(route.getDurationMinutes()).thenReturn(20);
+        when(route.getDistanceMeter()).thenReturn(1000);
+        when(route.getTotalFareAmount()).thenReturn(1500);
+        when(route.getOrder()).thenReturn(1);
+        when(route.getLegs()).thenReturn(List.of(busLeg, walkLeg));
+        when(routeRepository.findAllByTravelPlanId(55L)).thenReturn(List.of(route));
+
+        when(busLeg.getSequence()).thenReturn(1);
+        when(busLeg.getMode()).thenReturn("BUS");
+        when(busLeg.getBusNumbers()).thenReturn(List.of("115"));
+        when(walkLeg.getSequence()).thenReturn(2);
+        when(walkLeg.getMode()).thenReturn("WALK");
+        when(walkLeg.getBusNumbers()).thenReturn(List.of());
+
+        ItineraryResponse response = service.getItinerary(7L, 55L);
+
+        ItineraryResponse.RouteSegmentResponse routeResponse = response.days().get(0).routes().get(0);
+        assertThat(routeResponse.realtime()).isFalse();
+        assertThat(routeResponse.nextArrivalMinutes()).isNull();
+        assertThat(routeResponse.realtimeMessage()).isNull();
+        assertThat(routeResponse.legs().get(0).realtime()).isFalse();
+        assertThat(routeResponse.legs().get(0).remainingStops()).isNull();
+        assertThat(routeResponse.legs().get(1).realtime()).isFalse();
+        verifyNoInteractions(tagoBusStopLookupService, busArrivalRealtimeService);
     }
 
     private void givenOwnedCompletedItem(Long itemId, ItineraryItem item) {
