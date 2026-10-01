@@ -23,6 +23,7 @@ public record ItineraryResponse(
         @JsonProperty("start_date") LocalDate startDate,
         @JsonProperty("end_date") LocalDate endDate,
         String status,
+        @JsonProperty("confirmed_at") LocalDateTime confirmedAt,
         int nights,
         @JsonProperty("day_count") int dayCount,
         @JsonProperty("days") List<ItineraryDayResponse> days
@@ -45,6 +46,7 @@ public record ItineraryResponse(
                 startDate,
                 endDate,
                 travelPlan.getStatus().name(),
+                travelPlan.getConfirmedAt(),
                 nights,
                 days.size(),
                 days
