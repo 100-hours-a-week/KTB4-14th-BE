@@ -58,6 +58,27 @@ class TagoBusStopLookupServiceTest {
     }
 
     @Test
+    void 시군구_지역명으로_TAGO_도시코드를_조회한다() {
+        when(region.getName()).thenReturn("수원시");
+        when(region.getFullName()).thenReturn("경기도 수원시");
+        when(leg.getBoardingStopName()).thenReturn("수원역");
+        when(client.findCities()).thenReturn(List.of(
+                new TagoBusStopClient.City("31010", "수원시")
+        ));
+        when(client.findStopsByName("31010", "수원역")).thenReturn(List.of(
+                new TagoBusStopClient.Stop("31010", "SWA000001", "수원역", "1234")
+        ));
+
+        List<TagoBusStopLookupService.TagoStopIdentifier> result =
+                service.findCandidates(route, leg);
+
+        assertThat(result).containsExactly(
+                new TagoBusStopLookupService.TagoStopIdentifier("31010", "SWA000001")
+        );
+        verify(client).findStopsByName("31010", "수원역");
+    }
+
+    @Test
     void WALK_leg은_TAGO_정류장_조회를_하지_않는다() {
         when(leg.getMode()).thenReturn("WALK");
 
