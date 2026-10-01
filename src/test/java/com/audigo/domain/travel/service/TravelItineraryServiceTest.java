@@ -168,6 +168,8 @@ class TravelItineraryServiceTest {
         when(region.getFullName()).thenReturn("대전광역시 서구");
         when(plan.getArrivalDatetime()).thenReturn(LocalDateTime.of(2026, 9, 29, 9, 0));
         when(plan.getDepartureDatetime()).thenReturn(LocalDateTime.of(2026, 10, 1, 18, 0));
+        LocalDateTime confirmedAt = LocalDateTime.of(2026, 9, 28, 12, 0);
+        when(plan.getConfirmedAt()).thenReturn(confirmedAt);
 
         when(day.getId()).thenReturn(1L);
         when(day.getDayNumber()).thenReturn(1);
@@ -198,6 +200,7 @@ class TravelItineraryServiceTest {
 
         ItineraryResponse response = service.getItinerary(7L, 55L);
 
+        assertThat(response.confirmedAt()).isEqualTo(confirmedAt);
         ItineraryResponse.RouteSegmentResponse routeResponse = response.days().get(0).routes().get(0);
         assertThat(routeResponse.realtime()).isFalse();
         assertThat(routeResponse.nextArrivalMinutes()).isNull();
