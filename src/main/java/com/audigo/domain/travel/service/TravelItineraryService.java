@@ -73,7 +73,10 @@ public class TravelItineraryService {
                 .collect(Collectors.groupingBy(route -> route.getFromItineraryItem().getItineraryDay().getId()));
 
         List<ItineraryResponse.ItineraryDayResponse> responseDays = days.stream()
-                .map(day -> toDayResponse(day, routesByDay.getOrDefault(day.getId(), List.of())))
+                .map(day -> toDayResponse(
+                        day,
+                        routesByDay.getOrDefault(day.getId(), List.of())
+                ))
                 .toList();
         return ItineraryResponse.from(plan, responseDays);
     }
@@ -92,9 +95,6 @@ public class TravelItineraryService {
         }
         LocalDateTime changedAt = completed ? LocalDateTime.now() : null;
         item.updateCompletion(completed, changedAt);
-        if (completed) {
-            refreshPublicRoutes(plan.getId(), item, changedAt);
-        }
         return new ItineraryCompletionResponse(item.getId(), item.isCompleted(), item.getCompletedAt());
     }
 
@@ -126,13 +126,19 @@ public class TravelItineraryService {
         );
     }
 
-    private ItineraryResponse.ItineraryDayResponse toDayResponse(ItineraryDay day, List<RouteSegment> routes) {
+    private ItineraryResponse.ItineraryDayResponse toDayResponse(
+            ItineraryDay day,
+            List<RouteSegment> routes
+    ) {
         List<ItineraryItem> items = itemRepository.findAllByItineraryDayIdOrderBySequenceAsc(day.getId());
         List<ItineraryResponse.ItineraryItemResponse> itemResponses = items.stream()
                 .map(item -> ItineraryResponse.ItineraryItemResponse.from(item, metadataStore))
                 .toList();
         List<ItineraryResponse.RouteSegmentResponse> routeResponses = routes.stream()
-                .map(route -> ItineraryResponse.RouteSegmentResponse.from(route, metadataStore.route(route.getId())))
+                .map(route -> ItineraryResponse.RouteSegmentResponse.from(
+                        route,
+                        metadataStore.route(route.getId())
+                ))
                 .toList();
         return new ItineraryResponse.ItineraryDayResponse(
                 day.getId(), day.getDayNumber(), day.getTravelDate(), itemResponses, routeResponses);
@@ -165,22 +171,6 @@ public class TravelItineraryService {
                 }
             }
         }
-    }
-
-    private void refreshPublicRoutes(Long planId, ItineraryItem completedItem, LocalDateTime completedAt) {
-        routeRepository.findAllByTravelPlanId(planId).stream()
-                .filter(route -> route.getTransportType() == TravelTransportType.PUBLIC_TRANSPORT)
-                .filter(route -> java.util.Objects.equals(route.getFromItineraryItem().getId(), completedItem.getId())
-                        || java.util.Objects.equals(route.getToItineraryItem().getId(), completedItem.getId()))
-                .forEach(route -> {
-                    try {
-                        realtimeService.refresh(route, completedAt);
-                    } catch (RuntimeException exception) {
-                        // 실시간 API 장애가 일정 완료 자체를 실패시키지 않도록 한 번 더 보호
-                        log.warn("인접 대중교통 경로 갱신에 실패했지만 일정 완료는 유지합니다. routeId={}",
-                                route.getId(), exception);
-                    }
-                });
     }
 
     private TravelPlan ownedPlan(Long userId, Long travelPlanId) {
