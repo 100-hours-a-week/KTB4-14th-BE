@@ -87,7 +87,7 @@ class TravelItineraryPersistenceServiceTest {
         when(plan.getId()).thenReturn(55L);
         when(plan.getArrivalDatetime()).thenReturn(LocalDateTime.of(2026, 9, 22, 10, 0));
         when(plan.getDepartureDatetime()).thenReturn(LocalDateTime.of(2026, 9, 23, 18, 0));
-        when(plan.getRequiredPlaces()).thenReturn(List.of(firstPlace, secondPlace));
+        when(plan.getUserRequiredPlaces()).thenReturn(List.of(firstPlace, secondPlace));
         when(planPlaceRepository.findAllByTravelPlanIdOrderByPlaceOrderAsc(55L))
                 .thenReturn(List.of(firstPlace, secondPlace));
         when(dayRepository.save(any(ItineraryDay.class))).thenReturn(day);
@@ -140,7 +140,7 @@ class TravelItineraryPersistenceServiceTest {
         when(plan.getId()).thenReturn(55L);
         when(plan.getArrivalDatetime()).thenReturn(LocalDateTime.of(2026, 9, 24, 10, 0));
         when(plan.getDepartureDatetime()).thenReturn(LocalDateTime.of(2026, 9, 26, 18, 0));
-        when(plan.getRequiredPlaces()).thenReturn(List.of());
+        when(plan.getUserRequiredPlaces()).thenReturn(List.of());
         when(planPlaceRepository.findAllByTravelPlanIdOrderByPlaceOrderAsc(55L)).thenReturn(List.of());
         when(placeRepository.findByProviderAndProviderPlaceId(PlaceProvider.KAKAO, "mock-place-1"))
                 .thenReturn(Optional.of(firstPlace));
