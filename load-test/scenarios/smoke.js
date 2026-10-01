@@ -2,7 +2,7 @@ import { group, sleep } from 'k6';
 
 import { get, patch, post } from '../lib/api.js';
 import { checkApiResponse, responseData } from '../lib/checks.js';
-import { requireExternalSmokeConfirmation, requireWriteConfirmation } from '../lib/profile.js';
+import { requireCompletionResetConfirmation, requireExternalSmokeConfirmation, requireWriteConfirmation } from '../lib/profile.js';
 import { currentUser, requireField } from '../lib/test-data.js';
 
 const runCompletionSmoke = __ENV.RUN_COMPLETION_SMOKE === 'true';
@@ -16,6 +16,7 @@ const creationRequest = runCreationSmoke
 
 if (runCompletionSmoke) {
     requireWriteConfirmation();
+    requireCompletionResetConfirmation();
 }
 
 if (runCreationSmoke) {

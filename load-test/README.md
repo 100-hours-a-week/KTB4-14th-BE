@@ -1,17 +1,280 @@
 # Audigo Staging 부하테스트
 
-Spring Boot 소스는 수정하지 않고 `load-test/`의 스크립트만 사용해 **Staging Backend와 MySQL**을
-검증한다. 운영 API `https://api.audigo.kr`는 코드에서 차단하며, 운영 DB에는 사용자 생성·시딩·날짜
-변경·초기화 SQL을 실행하지 않는다.
+Spring Boot 소스는 변경하지 않고 `load-test/`만 사용해 **Staging Backend와 MySQL**을 검증한다.
+운영 API `https://api.audigo.kr`는 코드에서 차단한다. CPU·메모리·p95·5xx는 자동 감속 조건이 아니라
+**한계점 분석을 위한 기록값**이다.
 
-## 현재 진행 상태 (2026-09-30)
+## 빠른 실행 명령어
 
+모든 명령은 `load-test/`에서 실행한다. 각 줄 끝의 `\` 뒤에는 공백을 넣지 않는다. 결과는
+`results/YYYY-MM-DD-HH-mm/`에 저장되고, 하위 시나리오는 `itinerary-ramping-arrival-summary.json`처럼
+폴더명을 포함한 이름으로 구분된다.
+
+### 매 실행 전: JWT와 완료 데이터 준비
+
+```bash
+cd load-test
+read -rs STAGING_JWT_SECRET
+export STAGING_JWT_SECRET
+printf '\n'
+node scripts/initData/generate-test-tokens.mjs --ttl 86400
+unset STAGING_JWT_SECRET
+node scripts/test/validate-test-data.mjs --min-token-ttl-seconds 1800
+
+CONFIRM_STAGING=true \
+ALLOW_WRITE_TESTS=true \
+CONFIRM_COMPLETION_RESET=true \
+./scripts/reset-completions.sh
+```
+
+| 옵션 | 기본값 | 설명 |
+| --- | --- | --- |
+| `STAGING_JWT_SECRET` | Staging 전용 Secret | `.env`·Git에 저장하지 않는다. Secret 교체 뒤에는 JWT를 다시 발급한다. |
+| `--ttl 86400` | 24시간 | 사용자별 Access Token 유효 시간이다. |
+| `--min-token-ttl-seconds 1800` | 30분 | 실행 전 요구하는 JWT 최소 잔여 유효 시간이다. |
+| `CONFIRM_STAGING=true` | 필수 | Staging 실행을 명시한다. |
+| `ALLOW_WRITE_TESTS=true` | 쓰기에서 필수 | 완료·생성 요청을 허용한다. |
+| `CONFIRM_COMPLETION_RESET=true` | 복구에서 필수 | 완료 상태를 `false`로 복구하는 요청을 허용한다. |
+
+### Smoke와 고정 Baseline
+
+```bash
+# 읽기 Smoke
+CONFIRM_STAGING=true \
+./scripts/test/run-k6.sh scenarios/smoke.js
+
+# Smoke에서 완료 처리까지 확인하고 1개 수동 복구
+CONFIRM_STAGING=true \
+ALLOW_WRITE_TESTS=true \
+CONFIRM_COMPLETION_RESET=true \
+RUN_COMPLETION_SMOKE=true \
+./scripts/test/run-k6.sh scenarios/smoke.js
+
+CONFIRM_STAGING=true \
+ALLOW_WRITE_TESTS=true \
+CONFIRM_COMPLETION_RESET=true \
+./scripts/reset-completions.sh --count 1
+
+# Smoke → LT-01 → LT-05 → LT-02 → LT-06 전체 Baseline (LT-02 자동 복구 포함)
+CONFIRM_STAGING=true \
+ALLOW_WRITE_TESTS=true \
+CONFIRM_COMPLETION_RESET=true \
+./scripts/test/run-baseline-suite.sh
+```
+
+| 명령 / 옵션 | 기본값 | 설명 |
+| --- | --- | --- |
+| `RUN_COMPLETION_SMOKE=true` | `false` | Smoke에 LT-02 쓰기·재조회를 추가한다. |
+| `run-baseline-suite.sh` | 약 16~18분 | 고정 요청률 Baseline, SSE handshake Smoke, SSE 연결 유지 검증을 순차 실행하고 완료 항목을 자동 복구한다. |
+| `ITINERARY_READ_DURATION`, `GENERATION_POLL_DURATION`, `COMPLETION_DURATION`, `SSE_DURATION` | 각 5m/5m/5m/1m | Baseline 실행 시간을 명령 앞 환경변수로 바꿀 수 있다. |
+
+### LT-01: 일정 조회 (고정 / 여행 당일 Ramp)
+
+```bash
+# 고정 처리량 Baseline: 13 flow/min, 5분
+CONFIRM_STAGING=true \
+./scripts/test/run-k6.sh scenarios/itinerary/constant-arrival.js
+
+# Ramp: 낮음 → 중간 → 피크 → 유지 → 낮음
+CONFIRM_STAGING=true \
+./scripts/test/run-k6.sh scenarios/itinerary/ramping-arrival.js
+
+# Ramp의 짧은 Staging Smoke 예시
+CONFIRM_STAGING=true \
+ITINERARY_RAMP_START_RATE_PER_MINUTE=1 \
+ITINERARY_RAMP_STAGE_1_RATE_PER_MINUTE=2 \
+ITINERARY_RAMP_STAGE_2_RATE_PER_MINUTE=3 \
+ITINERARY_RAMP_PEAK_RATE_PER_MINUTE=4 \
+ITINERARY_RAMP_STAGE_1_DURATION=10s \
+ITINERARY_RAMP_STAGE_2_DURATION=10s \
+ITINERARY_RAMP_UP_DURATION=10s \
+ITINERARY_RAMP_PEAK_DURATION=20s \
+ITINERARY_RAMP_DOWN_DURATION=10s \
+ITINERARY_RAMP_PRE_ALLOCATED_VUS=2 \
+ITINERARY_RAMP_MAX_VUS=10 \
+./scripts/test/run-k6.sh scenarios/itinerary/ramping-arrival.js
+```
+
+| executor / 환경변수 | 기본값 | 설명 |
+| --- | --- | --- |
+| `constant-arrival-rate`, `ITINERARY_FLOW_RATE_PER_MINUTE` | `13` flow/min | LT-01 한 flow는 `upcoming → recent → itinerary`의 **HTTP 3개**다. |
+| `ramping-arrival-rate`, `ITINERARY_RAMP_START_RATE_PER_MINUTE` | `13` flow/min | Ramp 시작·종료 flow/min이다. |
+| `ITINERARY_RAMP_STAGE_1/2_RATE_PER_MINUTE` | `200` / `500` | 중간 목표 flow/min이다. |
+| `ITINERARY_RAMP_PEAK_RATE_PER_MINUTE` | `1000` | 피크 flow/min, HTTP 약 50 RPS다. |
+| `ITINERARY_RAMP_*_DURATION` | 1m / 1m / 1m / 5m / 1m | stage1, stage2, 상승, 피크 유지, 감소 시간이다. |
+| `*_PRE_ALLOCATED_VUS`, `*_MAX_VUS` | 시나리오별 상이 | 목표 요청률을 처리하기 위한 k6 VU 풀이다. RPS 자체는 rate가 결정한다. |
+
+`목표 flow/min = 목표 HTTP RPS × 20` 이다. 예를 들어 `1,000 flow/min × 3 HTTP ÷ 60초 = 약 50 RPS`다.
+
+### LT-02: 완료·재조회와 Toggle
+
+```bash
+# 실제 사용자 흐름(false → true)만 성능 측정 후 수동 복구
+CONFIRM_STAGING=true \
+ALLOW_WRITE_TESTS=true \
+CONFIRM_COMPLETION_RESET=true \
+./scripts/test/run-k6.sh scenarios/completion/constant-arrival.js
+
+CONFIRM_STAGING=true \
+ALLOW_WRITE_TESTS=true \
+CONFIRM_COMPLETION_RESET=true \
+./scripts/reset-completions.sh \
+--summary results/<RUN-ID>/completion-constant-arrival-summary.json
+
+# 완료 처리 Ramp를 실행하고 결과 summary 기준으로 자동 복구
+CONFIRM_STAGING=true \
+ALLOW_WRITE_TESTS=true \
+CONFIRM_COMPLETION_RESET=true \
+./scripts/test/run-completion-with-reset.sh scenarios/completion/ramping-arrival.js
+
+# 현재 상태를 읽어 반대값으로 바꾸는 양방향 Toggle + 자동 복구
+CONFIRM_STAGING=true \
+ALLOW_WRITE_TESTS=true \
+CONFIRM_COMPLETION_RESET=true \
+COMPLETION_TOGGLE_VUS=10 \
+COMPLETION_TOGGLE_ITERATIONS=1 \
+./scripts/test/run-completion-with-reset.sh scenarios/completion/toggle.js
+```
+
+| executor / 환경변수 | 기본값 | 설명 |
+| --- | --- | --- |
+| `constant-arrival-rate`, `COMPLETION_FLOW_RATE_PER_MINUTE` | `1` flow/min | 실제 LT-02는 `false → true PATCH → itinerary GET`이다. |
+| `ramping-arrival-rate`, `COMPLETION_RAMP_*` | 1 → 2 → 5 → 10 → 1 flow/min | 낮음 → 중간 → 피크 → 유지 → 감소. 시간은 `COMPLETION_RAMP_*_DURATION`으로 설정한다. |
+| `per-vu-iterations`, `COMPLETION_TOGGLE_VUS`, `COMPLETION_TOGGLE_ITERATIONS` | 1 / 1 | Toggle은 itinerary에서 현재 상태를 읽고 반대값 PATCH 후 재조회한다. |
+| `completion_attempts` | summary metric | 실제 false→true 항목 배정 수다. 첫 N개 `test-ids.json` 항목과 대응한다. |
+| `completion_toggle_attempts`, `completion_false_to_true`, `completion_true_to_false` | summary metric | Toggle 배정 수와 각 실제 상태 전환 성공 수다. |
+
+완료 관련 한 실행은 고유 `itineraryItemId` 150개까지만 사용한다. 151번째 배정은 재사용하지 않고 명확한
+오류로 종료한다. 자동 복구는 performance log와 `completion-reset.log`를 분리해 기록하며, summary가 없으면
+안전 fallback으로 모든 테스트 항목을 `false`로 복구한다.
+
+### LT-05와 LT-06
+
+```bash
+# LT-05: 준비된 Job 상태 폴링 (새 여행 생성 없음)
+CONFIRM_STAGING=true \
+./scripts/test/run-k6.sh scenarios/generation/polling.js
+
+# LT-06 최초 실행 전 한 번: SSE 지원 k6 바이너리 생성
+./scripts/test/setup-k6-sse.sh
+
+# LT-06: SSE handshake Smoke (연결 1회, `connected` 이벤트와 HTTP 200 확인)
+CONFIRM_STAGING=true \
+./scripts/test/run-k6.sh scenarios/sse/handshake-smoke.js
+
+# LT-06: 고정 SSE 연결 유지
+CONFIRM_STAGING=true \
+SSE_CONNECTIONS=10 \
+SSE_DURATION=5m \
+./scripts/test/run-k6.sh scenarios/sse/constant-vus.js
+
+# LT-06: 1 → 10 → 30 → 70 연결 Ramp
+CONFIRM_STAGING=true \
+./scripts/test/run-k6.sh scenarios/sse/ramping-vus.js
+```
+
+| executor / 환경변수 | 기본값 | 설명 |
+| --- | --- | --- |
+| LT-05 `constant-arrival-rate`, `GENERATION_POLL_RATE_PER_MINUTE` | 30 req/min | 요청 1개 flow이므로 `req/min ÷ 60 = RPS`다. |
+| LT-06 handshake Smoke, `per-vu-iterations` | 1 VU × 1회 | `open`과 초기 `connected` 이벤트를 받은 뒤 연결을 닫고 HTTP 200을 검증한다. |
+| LT-06 `constant-vus`, `SSE_CONNECTIONS`, `SSE_DURATION` | 1 / 1m | VU 1개 = SSE 연결 1개다. |
+| LT-06 `ramping-vus`, `SSE_RAMP_STAGE_1/2/3_VUS`, `SSE_RAMP_PEAK_VUS` | 1 / 10 / 30 / 70 | 연결 수와 stage 시간은 `SSE_RAMP_*_DURATION`으로 조절한다. 최대 150명이다. |
+| SSE metric | summary | 아래 SSE 지표를 함께 확인한다. |
+
+LT-06과 P-02의 SSE executor는 `k6/x/sse`를 사용하므로 **SSE 지원 custom k6 바이너리**가 필요하다.
+일반 `k6`의 자동 확장 해석은 현재 `k6/x/sse` 의존성을 빌드하지 못하므로 사용하지 않는다. 최초 한 번 아래
+스크립트로 `.bin/k6-sse`를 만든다. 스크립트는 `xk6-sse v0.1.11`, `k6 v1.1.0`을 고정해 빌드한다.
+
+```bash
+./scripts/test/setup-k6-sse.sh
+```
+
+이 스크립트는 로컬 `xk6` 또는 Docker를 사용한다. 로컬 빌드에는 Go와 `xk6`가, Docker 빌드에는 실행 중인
+Docker daemon이 필요하다. 최초 빌드에서는 Go 모듈 또는 Docker 이미지 다운로드를 위해 네트워크 연결이 필요할 수
+있다. `run-k6.sh`는 `K6_BIN`이 지정되면 그것을 먼저 사용하고, 없으면 `.bin/k6-sse`, 마지막으로
+일반 `k6`를 사용한다. `.bin/k6-sse`가 생성된 뒤에는 읽기·쓰기·SSE 모두 같은 k6 버전으로 실행해
+결과 비교 조건을 맞춘다. 고부하 실행 전에는 SSE 바이너리로 시나리오 로딩을 확인한다.
+
+```bash
+set -a
+source .env
+set +a
+
+CONFIRM_STAGING=true \
+./.bin/k6-sse inspect --include-system-env-vars \
+scenarios/sse/handshake-smoke.js
+```
+
+| metric | 의미 | 적용 범위 |
+| --- | --- | --- |
+| `sse_connection_attempts` | SSE 구독 요청을 시작한 횟수 | handshake Smoke, 연결 유지 |
+| `sse_connection_opened` | SSE 연결이 열렸다는 `open` 콜백 수 | handshake Smoke, 연결 유지 |
+| `sse_connected_events` | Backend가 보낸 초기 `connected` 이벤트 수 | handshake Smoke, 연결 유지 |
+| `sse_events_received` | 초기 이벤트를 포함해 수신한 전체 SSE 이벤트 수 | handshake Smoke, 연결 유지 |
+| `sse_connection_errors` | SSE client 오류 콜백 수 | handshake Smoke, 연결 유지 |
+| `sse_handshake_200` | 연결을 명시적으로 닫은 뒤 확인한 HTTP 200 수 | handshake Smoke |
+
+브라우저 수준 자동 재연결, `Last-Event-ID`, 장시간 이벤트 전달 보장은 별도로 측정하지 않는다. 재구독은
+handshake Smoke를 다시 실행해 확인한다.
+
+### P-01 생성 증가와 P-02 여행 당일 스파이크
+
+```bash
+# P-01 고정 생성 시작률
+CONFIRM_STAGING=true \
+ALLOW_WRITE_TESTS=true \
+CONFIRM_AI_MOCK=true \
+./scripts/test/run-k6.sh scenarios/p01/constant-arrival.js
+
+# P-01 생성 시작률 Ramp
+CONFIRM_STAGING=true \
+ALLOW_WRITE_TESTS=true \
+CONFIRM_AI_MOCK=true \
+./scripts/test/run-k6.sh scenarios/p01/ramping-arrival.js
+
+# P-01 동시 생성 사용자(VU) Ramp: 각 VU는 생성 전체 흐름을 한 번만 실행
+CONFIRM_STAGING=true \
+ALLOW_WRITE_TESTS=true \
+CONFIRM_AI_MOCK=true \
+./scripts/test/run-k6.sh scenarios/p01/ramping-vus.js
+
+# 기존 P-02 고정 혼합 부하 + 자동 완료 복구
+CONFIRM_STAGING=true \
+ALLOW_WRITE_TESTS=true \
+CONFIRM_COMPLETION_RESET=true \
+./scripts/test/run-completion-with-reset.sh scenarios/p02/constant-mix.js
+
+# 여행 당일 Ramp: LT-01 Ramp + LT-02 Ramp + 고정 SSE 동시 실행, 자동 복구
+CONFIRM_STAGING=true \
+ALLOW_WRITE_TESTS=true \
+CONFIRM_COMPLETION_RESET=true \
+./scripts/test/run-completion-with-reset.sh scenarios/p02/ramping-spike.js
+```
+
+| 프로파일 / executor | 기본값 | 설명 |
+| --- | --- | --- |
+| P-01 `constant-arrival-rate`, `P01_CREATION_RATE_PER_HOUR` | 6 생성/시간 | 일정한 생성 시작률의 Backend·DB 처리량을 본다. |
+| P-01 `ramping-arrival-rate`, `P01_RAMP_*_RATE_PER_HOUR` | 6 → 12 → 30 → 60 → 6 | 여행일 전 증가·집중 패턴을 본다. stage 시간은 `P01_RAMP_*_DURATION`이다. |
+| P-01 `ramping-vus`, `P01_RAMP_VU_*` | 1 → 3 → 10 → 0 VU | 각 VU는 1회만 `지역 → 생성 → 폴링 → 일정` 전체 흐름을 실행한다. 최대 150계정이다. |
+| P-02 고정 | 13 읽기 flow/min, 5 완료 flow/min, SSE 10 | 기존 혼합 프로파일이다. `P02_DURATION`이 공통 시간이다. |
+| P-02 Ramp | 읽기 13→26→52→100→13, 완료 1→2→5→10→1, SSE 10 | 여행 당일 스파이크용이다. 읽기 `P02_ITINERARY_RAMP_*_DURATION`과 완료 `P02_COMPLETION_RAMP_*_DURATION`은 독립 설정하되 총합이 같아야 하며, SSE 시간은 그 합계로 자동 계산된다. |
+
+P-01은 실행마다 새 여행·생성 Job·일정 데이터를 Staging DB에 남긴다. 반드시 AI Mock 라우팅을 배포에서 확인하고
+`CONFIRM_AI_MOCK=true`를 넣는다. P-01 생성 데이터는 `loadtest-` 사용자와 실행 ID를 기준으로 별도 정리한다.
+
+401/403이 발생하면 요청률을 높이지 말고 JWT Secret·토큰 TTL·Staging 접근 권한을 먼저 수정한다.
+
+
+## 현재 진행 상태 (2026-10-01)
+
+- 2026-10-01 18:58 KST에 JWT 재발급 후 인증 preflight HTTP 200과 읽기 Smoke를 통과했다.
+  HTTP 요청 5개와 check 15/15가 모두 성공했고, 오류율 0%, p95 28.99ms였다.
 - Staging DB에 `loadtest-001`~`loadtest-150` 사용자 150명을 생성했다.
 - 사용자별 JWT, 미래 여행의 `travelPlanId`, `itineraryItemId`, `generationJobId`가
   `data/test-ids.json`에 준비됐다.
 - 사용자별 두 번째 여행을 생성한 뒤 과거 날짜로 변경했고, 과거 여행 보유 사용자 수 150명을
   확인했다.
-- 기본 Smoke 결과는 HTTP 요청 5개 모두 성공, check 15/15 성공, 오류율 0%, p95 약 84.86ms였다.
+- 이전 기본 Smoke 결과도 HTTP 요청 5개 모두 성공, check 15/15 성공, 오류율 0%, p95 약 84.86ms였다.
 - 완료 처리 Smoke는 HTTP 요청 7개 모두 성공, check 21/21 성공, 오류율 0%, p95 약 38.88ms였고
   실행 후 대상 항목을 `is_completed=false`로 복구했다.
 - LT-02는 iteration마다 서로 다른 사용자를 쓰며, 실행 summary를 기준으로 사용한 항목만
@@ -66,18 +329,38 @@ LT-05가 서로 다른 여행을 보게 되므로 넣지 않는다.
 
 ## 2. 제공 시나리오와 기본 요청량
 
-| 파일 | 설계 ID | 흐름 | 기본 설정 | 5분 기준 목표 요청 |
-| --- | --- | --- | --- | ---: |
-| `scenarios/smoke.js` | LT-01·02·04·05 | 기본 읽기 5개, 쓰기·생성은 선택 | 1 VU, 1 iteration | 기본 5개 |
-| `scenarios/itinerary-read.js` | LT-01 | upcoming → recent → itinerary | 13 흐름/분, 5분 | 65 흐름, 약 195개 |
-| `scenarios/completion.js` | LT-02 | completion → itinerary 재조회 | 1 흐름/분, 5분 | 5 흐름, 약 10개 |
-| `scenarios/generation-polling.js` | LT-05 | 준비된 Job 상태 조회 | 30요청/분, 5분 | 약 150개 |
-| `scenarios/sse.js` | LT-06 | unread-count → SSE 연결 유지 | 연결 1개, 1분 | HTTP 1개 + SSE 1개 |
-| `scenarios/p01.js` | P-01 / LT-04 | 지역 조회 → 생성 → 완료 폴링 → 일정 조회 | 6 생성/시간, 1시간 | 생성 6개 + 폴링·일정 조회 |
-| `scenarios/p02.js` | P-02 | LT-01·LT-02·LT-06 동시 실행 | 읽기 13·완료 5 흐름/분, SSE 10개, 10분 | 혼합 프로파일 |
+```
+scenarios/
+├── smoke.js
+├── itinerary/   # LT-01: flow.js + constant-arrival.js + ramping-arrival.js
+├── completion/  # LT-02: flow.js + constant-arrival.js + ramping-arrival.js + toggle.js
+├── generation/  # LT-05: polling.js
+├── sse/         # LT-06: flow.js + handshake-smoke.js + constant-vus.js + ramping-vus.js
+├── p01/         # LT-04 전체 생성: flow.js + 3가지 executor
+└── p02/         # 고정 혼합과 여행 당일 Ramp 혼합
+```
 
-도착률 executor는 로컬 장비나 Staging이 처리하지 못하면 `dropped_iterations`가 생길 수 있으므로
-표의 값은 목표치다. 실제 `http_reqs`, `iterations`, `dropped_iterations`는 결과 JSON에서 확인한다.
+| 파일 | 설계 ID | executor | 기본 설정 |
+| --- | --- | --- | --- |
+| `scenarios/smoke.js` | Smoke | shared iterations | 1 VU, 1 iteration |
+| `itinerary/constant-arrival.js` | LT-01 | constant-arrival-rate | 13 flow/min, 5m |
+| `itinerary/ramping-arrival.js` | LT-01 | ramping-arrival-rate | 13 → 200 → 500 → 1000 → 13 flow/min |
+| `completion/constant-arrival.js` | LT-02 | constant-arrival-rate | 1 flow/min, 5m |
+| `completion/ramping-arrival.js` | LT-02 | ramping-arrival-rate | 1 → 2 → 5 → 10 → 1 flow/min |
+| `completion/toggle.js` | LT-02 검증 | per-vu-iterations | 1 VU × 1회 |
+| `generation/polling.js` | LT-05 | constant-arrival-rate | 30 req/min, 5m |
+| `sse/handshake-smoke.js` | LT-06 검증 | per-vu-iterations | 1 VU × 1회, `connected` 이벤트·HTTP 200 확인 |
+| `sse/constant-vus.js` | LT-06 | constant-vus | 1 연결, 1m |
+| `sse/ramping-vus.js` | LT-06 | ramping-vus | 1 → 10 → 30 → 70 → 1 연결 |
+| `p01/constant-arrival.js` | P-01/LT-04 | constant-arrival-rate | 6 생성/h, 1h |
+| `p01/ramping-arrival.js` | P-01/LT-04 | ramping-arrival-rate | 6 → 12 → 30 → 60 → 6 생성/h |
+| `p01/ramping-vus.js` | P-01/LT-04 | ramping-vus | 1 → 3 → 10 → 0 VU, VU당 1 생성 흐름 |
+| `p02/constant-mix.js` | P-02 | CAR + CAR + CVU | 읽기 13, 완료 5 flow/min, SSE 10 |
+| `p02/ramping-spike.js` | P-02 | RAR + RAR + CVU | 읽기·완료 Ramp + SSE 10 |
+
+도착률 executor는 처리 한계를 넘으면 `dropped_iterations`가 생길 수 있다. 이는 자동 감속 신호가 아니라,
+해당 목표율에서 처리하지 못한 흐름이라는 한계 분석 결과다. 실제 `http_reqs`, `iterations`,
+`dropped_iterations`, p95, 5xx와 서버 CPU·메모리를 같은 시간대에 기록한다.
 
 ## 3. 최초 1회 데이터 구축
 
@@ -606,7 +889,7 @@ CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true CONFIRM_COMPLETION_RESET=true \
 쓰기 Smoke가 필요하면 완료 상태를 즉시 되돌린다.
 
 ```bash
-CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true RUN_COMPLETION_SMOKE=true \
+CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true CONFIRM_COMPLETION_RESET=true RUN_COMPLETION_SMOKE=true \
   ./scripts/test/run-k6.sh scenarios/smoke.js
 
 CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true CONFIRM_COMPLETION_RESET=true \
@@ -624,7 +907,7 @@ CONFIRM_EXTERNAL_SMOKE=true RUN_CREATION_SMOKE=true \
 ### 5.2 전체 Baseline 일괄 실행
 
 현재 구현된 Backend 시나리오를 모두 한 번씩 실행하려면 다음 명령을 사용한다. 약 16~18분이 걸리며
-하나의 `results/YYYY-MM-DD-HH-mm/` 폴더에 Smoke, LT-01, LT-05, LT-02, LT-06 결과와 전체 로그를
+하나의 `results/YYYY-MM-DD-HH-mm/` 폴더에 Smoke, LT-01, LT-05, LT-02, LT-06 handshake·연결 유지 결과와 전체 로그를
 저장한다.
 
 ```bash
@@ -643,8 +926,9 @@ CONFIRM_COMPLETION_RESET=true \
 5. LT-05 생성 상태 폴링 Baseline 5분
 6. 완료 상태 전체 초기화 후 LT-02 Baseline 5분
 7. LT-02에서 실제 사용한 항목만 summary 기준으로 다시 초기화
-8. LT-06 SSE 연결 1개 Baseline 1분
-9. check 실패·HTTP 실패·dropped iteration 검증
+8. LT-06 SSE handshake Smoke: `open`, 초기 `connected` 이벤트, HTTP 200 검증
+9. LT-06 SSE 연결 1개 Baseline 1분
+10. check 실패·HTTP 실패·SSE 오류·dropped iteration 검증
 
 중간에 LT-02가 중단되면 안전장치가 전체 완료 항목 초기화를 시도한다. 결과 폴더에는 다음 파일이
 생긴다.
@@ -654,10 +938,11 @@ results/YYYY-MM-DD-HH-mm/
 ├── suite.log
 ├── suite-config.txt
 ├── smoke-summary.json
-├── itinerary-read-summary.json
+├── itinerary-constant-arrival-summary.json
 ├── generation-polling-summary.json
-├── completion-summary.json
-└── sse-summary.json
+├── completion-constant-arrival-summary.json
+├── sse-handshake-smoke-summary.json
+└── sse-constant-vus-summary.json
 ```
 
 이 명령은 모든 **Baseline 기능**을 확인하는 것이며, AI 대량 생성, P-01 2배, P-02 혼합 부하,
@@ -671,14 +956,16 @@ Baseline은 합격 기준이 아니라 **낮고 재현 가능한 부하에서 �
 
 ```bash
 # LT-01: 13 흐름/분 × 요청 3개 = 약 39 req/분, 5분
-./scripts/test/run-k6.sh scenarios/itinerary-read.js
+CONFIRM_STAGING=true \
+./scripts/test/run-k6.sh scenarios/itinerary/constant-arrival.js
 
 # LT-05: 약 30 req/분, 5분
-./scripts/test/run-k6.sh scenarios/generation-polling.js
+CONFIRM_STAGING=true \
+./scripts/test/run-k6.sh scenarios/generation/polling.js
 
 # LT-02: 1 흐름/분 × 요청 2개, 5분
-CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true \
-  ./scripts/test/run-k6.sh scenarios/completion.js
+CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true CONFIRM_COMPLETION_RESET=true \
+  ./scripts/test/run-k6.sh scenarios/completion/constant-arrival.js
 ```
 
 LT-02 결과와 서버 지표를 저장한 뒤, 해당 실행에서 사용한 항목만 되돌린다.
@@ -686,10 +973,10 @@ LT-02 결과와 서버 지표를 저장한 뒤, 해당 실행에서 사용한 �
 ```bash
 CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true CONFIRM_COMPLETION_RESET=true \
   ./scripts/reset-completions.sh \
-  --summary results/<LT-02-RUN-ID>/completion-summary.json
+  --summary results/<LT-02-RUN-ID>/completion-constant-arrival-summary.json
 ```
 
-예를 들어 summary의 `iterations.count`가 50이면 `completion.js`가 사용한 JSON 앞쪽 50명만
+예를 들어 summary의 `completion_attempts.count`가 50이면 `completion/flow.js`가 사용한 JSON 앞쪽 50명만
 `is_completed=false`로 되돌린다. 직접 지정할 수도 있다.
 
 ```bash
@@ -699,80 +986,71 @@ CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true CONFIRM_COMPLETION_RESET=true \
 
 ### 5.4 P-01 생성 증가 프로파일
 
-`p01.js`는 Staging AI Mock을 전제로 **지역 조회 → 여행 생성 → 생성 상태 폴링 → 일정 조회**를 한
-사용자 흐름으로 실행한다. 따라서 여행·생성 Job·일정 데이터가 실제 Staging MySQL에 저장된다.
-실행 전 Backend가 반드시 Mock으로 라우팅되는지 확인한다. `CONFIRM_AI_MOCK=true`는 이 확인을
-명시하는 안전장치일 뿐, Mock 라우팅을 자동으로 설정하지 않는다.
+P-01은 Staging AI Mock에서만 `지역 조회 → 여행 생성 → 생성 상태 폴링 → 일정 조회`를 실행한다.
+각 생성은 새 여행·Job·일정을 남긴다. 150명보다 많은 고유 생성 흐름은 데이터 재사용 대신 명확한 오류로
+중단된다.
 
 ```bash
-# 예상 피크 G=약 5.65건/시간에 해당하는 기본 실행: 6 생성/시간, 1시간
-ALLOW_WRITE_TESTS=true CONFIRM_AI_MOCK=true \
-  ./scripts/test/run-k6.sh scenarios/p01.js
+# 고정 생성 시작률
+CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true CONFIRM_AI_MOCK=true \
+  ./scripts/test/run-k6.sh scenarios/p01/constant-arrival.js
+
+# 여행일 전 증가 패턴: 시작률 Ramp
+CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true CONFIRM_AI_MOCK=true \
+  ./scripts/test/run-k6.sh scenarios/p01/ramping-arrival.js
+
+# 동시 생성 세션 Ramp: VU당 생성 전체 흐름 1회만 실행
+CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true CONFIRM_AI_MOCK=true \
+  ./scripts/test/run-k6.sh scenarios/p01/ramping-vus.js
 ```
 
-짧은 기능 검증은 생성 간격을 높이고 시간을 줄여 실행한다.
+`ramping-vus`는 executor만 바꾼 구현이 아니다. VU별 첫 iteration에서만 생성 흐름을 실행하고 이후에는
+idle 상태로 유지하므로 동일 계정의 반복·동시 생성이 없다. 생성 결과의 `p01_creation_attempts`,
+`p01_generation_completed`, `p01_generation_failed`, `p01_generation_poll_requests`와 DB 증가량을 함께 기록한다.
+
+LT-05는 새 여행을 만들지 않고 준비된 Job 상태 조회 한계만 분리 측정한다.
 
 ```bash
-# 약 1분마다 생성 1건, 5분 동안 실행
-ALLOW_WRITE_TESTS=true CONFIRM_AI_MOCK=true \
-P01_CREATION_RATE_PER_HOUR=60 P01_DURATION=5m \
-  ./scripts/test/run-k6.sh scenarios/p01.js
+CONFIRM_STAGING=true GENERATION_POLL_RATE_PER_MINUTE=30 GENERATION_POLL_DURATION=10m \
+  ./scripts/test/run-k6.sh scenarios/generation/polling.js
+
+CONFIRM_STAGING=true GENERATION_POLL_RATE_PER_MINUTE=60 GENERATION_POLL_DURATION=10m \
+  ./scripts/test/run-k6.sh scenarios/generation/polling.js
 ```
-
-P-01은 생성 요청마다 새 여행·Job·일정을 남긴다. 실행 결과의 `p01_creation_attempts`,
-`p01_generation_completed`, `p01_generation_failed`, `p01_generation_poll_requests`를 기록하고,
-생성된 `loadtest-` 사용자 데이터의 정리 기준을 정한 뒤에만 요청률을 올린다. 한 실행에서는 서로 다른
-계정을 사용하므로 현재 150명 데이터로 최대 150개 생성 흐름만 실행할 수 있다.
-
-LT-05는 새 여행을 만들지 않고 준비된 Job의 상태 조회 한계만 분리 측정할 때 사용한다.
-
-```bash
-# 예상 피크 약 0.494 RPS에 가까운 30 req/분
-GENERATION_POLL_RATE_PER_MINUTE=30 \
-GENERATION_POLL_DURATION=10m \
-  ./scripts/test/run-k6.sh scenarios/generation-polling.js
-
-# 2배 단계
-GENERATION_POLL_RATE_PER_MINUTE=60 \
-GENERATION_POLL_DURATION=10m \
-  ./scripts/test/run-k6.sh scenarios/generation-polling.js
-```
-
-전체 생성 흐름 LT-04는 Mock 또는 실제 외부 연동 Smoke로만 실행한다. 대량 생성 시나리오가 필요하면
-외부 API 비용·실패 패턴과 테스트 데이터 정리 정책을 별도로 확정한 뒤 추가한다.
 
 ### 5.5 P-02 여행 당일 프로파일
 
-P-02는 LT-01, LT-02, LT-06의 개별 Baseline이 성공한 뒤 하나의 시나리오로 동시에 실행한다. 기본값은
-읽기 `13 흐름/분`, 완료·재조회 `5 흐름/분`, SSE `10개`, 실행 시간 `10분`이다.
+P-02 고정 혼합은 기존 비교 기준이고, `ramping-spike.js`는 여행 당일의 읽기·완료 스파이크를 재현한다.
+Ramp 구성은 **LT-01 RAR + LT-02 false→true RAR + 고정 SSE**다. Toggle은 P-02에 포함하지 않는다.
+P-02의 SSE도 LT-06과 같은 `k6/x/sse` 연결 유지 흐름을 사용하며 VU 1개가 연결 1개를 유지한다.
 
 ```bash
-ALLOW_WRITE_TESTS=true ./scripts/test/run-k6.sh scenarios/p02.js
+# 기존 고정 혼합 + summary 기준 자동 복구
+CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true CONFIRM_COMPLETION_RESET=true \
+  ./scripts/test/run-completion-with-reset.sh scenarios/p02/constant-mix.js
+
+# 여행 당일 Ramp + 자동 복구
+CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true CONFIRM_COMPLETION_RESET=true \
+  ./scripts/test/run-completion-with-reset.sh scenarios/p02/ramping-spike.js
 ```
 
-요청률·연결 수·시간을 바꾸려면 같은 명령 앞에 값을 지정한다.
+P-02 Ramp의 읽기 rate는 `P02_ITINERARY_RAMP_*_RATE_PER_MINUTE`, 완료 rate는
+`P02_COMPLETION_RAMP_*_RATE_PER_MINUTE`으로 독립 설정한다. stage 시간 역시 각 prefix의
+`*_DURATION`으로 독립 설정하지만 두 duration 총합은 같아야 한다. 다르면 시작 전에 오류가 난다.
+SSE 연결 수는 `P02_RAMP_SSE_CONNECTIONS`이고 duration은 두 Ramp 합계로 자동 설정된다.
+
+SSE의 별도 한계 탐색은 고정 VU 또는 Ramp로 수행한다.
 
 ```bash
-ALLOW_WRITE_TESTS=true P02_DURATION=10m ITINERARY_FLOW_RATE_PER_MINUTE=13 COMPLETION_FLOW_RATE_PER_MINUTE=5 SSE_CONNECTIONS=10 ./scripts/test/run-k6.sh scenarios/p02.js
+CONFIRM_STAGING=true SSE_CONNECTIONS=70 SSE_DURATION=10m \
+  ./scripts/test/run-k6.sh scenarios/sse/constant-vus.js
+
+CONFIRM_STAGING=true SSE_RAMP_PEAK_VUS=70 \
+  ./scripts/test/run-k6.sh scenarios/sse/ramping-vus.js
 ```
 
-P-02가 완료 처리한 항목은 결과 파일의 `completion_attempts`를 기준으로 복구한다.
-
-```bash
-CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true CONFIRM_COMPLETION_RESET=true ./scripts/reset-completions.sh --summary results/<P02-RUN-ID>/p02-summary.json
-```
-
-SSE는 다음 순서로 별도 한계도 확인한다.
-
-```bash
-SSE_CONNECTIONS=1  SSE_DURATION=5m  ./scripts/test/run-k6.sh scenarios/sse.js
-SSE_CONNECTIONS=10 SSE_DURATION=5m  ./scripts/test/run-k6.sh scenarios/sse.js
-SSE_CONNECTIONS=30 SSE_DURATION=10m ./scripts/test/run-k6.sh scenarios/sse.js
-SSE_CONNECTIONS=70 SSE_DURATION=10m ./scripts/test/run-k6.sh scenarios/sse.js
-```
-
-70은 시스템 한계라는 뜻이 아니라 초기 탐색 단계다. 각 단계의 메모리, 연결 오류와 재실행 시 재연결
-성공 여부를 보고 다음 연결 수를 정한다.
+70은 시스템 한계라는 뜻이 아니라 초기 탐색 단계다. 메모리, `sse_connection_errors`,
+`sse_connection_opened`, `sse_connected_events`와 다음 실행의 handshake Smoke 결과를 기록한 뒤 다음 연결 수를 결정한다.
 
 ### 5.6 2배·한계 탐색·장시간 안정성
 
@@ -781,15 +1059,15 @@ Baseline과 예상 피크가 안정적일 때만 요청률을 올린다.
 ```bash
 # LT-01 2배: 26 흐름/분 → 약 78 req/분
 ITINERARY_FLOW_RATE_PER_MINUTE=26 ITINERARY_READ_DURATION=10m \
-  ./scripts/test/run-k6.sh scenarios/itinerary-read.js
+  ./scripts/test/run-k6.sh scenarios/itinerary/constant-arrival.js
 
 # LT-02 50회: 10 흐름/분 × 5분 = 50 iterations, HTTP 약 100개
-CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true \
+CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true CONFIRM_COMPLETION_RESET=true \
 COMPLETION_FLOW_RATE_PER_MINUTE=10 COMPLETION_DURATION=5m \
-  ./scripts/test/run-k6.sh scenarios/completion.js
+  ./scripts/test/run-k6.sh scenarios/completion/constant-arrival.js
 ```
 
-`completion.js`는 iteration마다 서로 다른 사용자·일정 항목을 사용한다. 현재 데이터가 150명이므로
+`completion/flow.js`는 iteration마다 서로 다른 사용자·일정 항목을 사용한다. 현재 데이터가 150명이므로
 한 실행에서 최대 150회의 실제 `false → true` 전환만 허용된다. 그 이상 필요하면 사용자별 미완료
 항목을 추가로 준비해야 한다.
 
@@ -814,7 +1092,7 @@ LT-02는 흐름당 2개의 HTTP 요청을 보낸다. 완료 변경 요청 본문
 
 ## 7. 중단 기준과 결과 기록
 
-현재 고정 SLO는 Baseline 뒤 확정한다. 그 전에도 다음 현상이 보이면 현재 단계를 중단한다.
+현재 고정 SLO는 Baseline 뒤 확정한다. 아래 값은 **스크립트가 자동으로 요청률을 낮추는 조건이 아니다**. 운영자가 한계점을 기록한 뒤 다음 실행 여부를 판단하는 관측·중단 기준이다.
 
 - 5xx 또는 Timeout이 반복 증가
 - 이전 안정 단계보다 p95가 급격히 상승하고 회복하지 않음
@@ -827,6 +1105,8 @@ LT-02는 흐름당 2개의 HTTP 요청을 보낸다. 완료 변경 요청 본문
 - 실행 ID, 시작·종료 시각, 시나리오와 환경변수
 - BE·AI 배포 커밋과 Staging 설정 차이
 - 실제 `http_reqs`, RPS, p95·p99, 오류율, Timeout, dropped iterations
+- SSE 실행이면 `sse_connection_attempts`, `sse_connection_opened`, `sse_connected_events`,
+  `sse_events_received`, `sse_connection_errors` 및 handshake Smoke의 `sse_handshake_200`
 - 최대 CPU·메모리·디스크 사용률
 - 상위 오류와 발생 시각
 - 다음 단계 진행·재측정·중단 결정과 이유
@@ -836,7 +1116,7 @@ LT-02는 흐름당 2개의 HTTP 요청을 보낸다. 완료 변경 요청 본문
 ```text
 results/YYYY-MM-DD-HH-mm/<scenario>-summary.json
 
-예: results/2026-09-30-20-25/itinerary-read-summary.json
+예: results/2026-09-30-20-25/itinerary-constant-arrival-summary.json
 ```
 
 기본 폴더명은 실행을 시작한 KST 시각의 **년-월-일-시-분**이다. 같은 분에 서로 다른 시나리오를
@@ -848,10 +1128,24 @@ results/YYYY-MM-DD-HH-mm/<scenario>-summary.json
 
 ## 8. SSE 해석 주의
 
-k6 기본 HTTP 모듈은 전용 SSE 이벤트 검증 클라이언트가 아니다. 현재 시나리오는 VU 수만큼 연결을
-유지하면서 `sse_connection_attempts`, 응답, 서버 로그와 메모리를 함께 본다. 실행 종료 후 같은
-연결 수로 다시 실행해 재연결 안정성을 확인한다. 이벤트 본문·Last-Event-ID까지 검증하려면 별도
-SSE 지원 도구 또는 확장을 기술 검토 후 추가한다.
+LT-06과 P-02의 SSE는 `k6/x/sse` client로 측정한다. 연결 유지 시나리오는 VU 1개가 열린 SSE 연결
+1개를 점유하도록 설계됐다. 따라서 `constant-vus`와 `ramping-vus` 종료 시 다음 출력은 정상일 수 있다.
+
+```text
+0 complete and N interrupted iterations
+```
+
+이는 테스트 종료 또는 Ramp-down이 아직 열린 SSE 스트림을 중단했음을 뜻한다. 이 경우 iteration 완료 수가
+아니라 `sse_connection_attempts`, `sse_connection_opened`, `sse_connected_events`,
+`sse_events_received`, `sse_connection_errors`와 서버 메모리·로그를 판단 기준으로 사용한다.
+
+반대로 `scenarios/sse/handshake-smoke.js`는 초기 `connected` 이벤트 뒤 클라이언트가 연결을 명시적으로
+닫는다. 이 시나리오는 **1 iteration complete**여야 하며 `sse_handshake_200=1`,
+`sse_connection_errors=0`을 확인한다. handshake Smoke가 실패하면 연결 유지 또는 P-02 SSE 부하를
+시작하지 않는다.
+
+현재 범위는 연결 성립과 Backend 초기 `connected` 이벤트 수신까지다. 브라우저 수준 자동 재연결,
+`Last-Event-ID`, 임의 알림 이벤트의 장시간 전달 보장은 별도 시나리오가 필요하다.
 
 ## 9. Staging 시작·중지
 

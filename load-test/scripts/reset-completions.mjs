@@ -99,6 +99,7 @@ function countFromSummary(path) {
         usage(`could not read valid k6 summary JSON from ${path}: ${error.message}`);
     }
     const count = summary?.metrics?.completion_attempts?.count
+        ?? summary?.metrics?.completion_toggle_attempts?.count
         ?? summary?.metrics?.iterations?.count;
     if (!Number.isSafeInteger(count) || count <= 0) {
         usage(`${path} does not contain a positive completion attempt count`);

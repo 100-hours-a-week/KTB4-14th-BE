@@ -1,12 +1,12 @@
-import runCompletionFlow from './completion.js';
-import runItineraryReadFlow from './itinerary-read.js';
-import runSseFlow from './sse.js';
+import { runCompletionFlow } from '../completion/flow.js';
+import { runItineraryReadFlow } from '../itinerary/flow.js';
+import { runSseFlow } from '../sse/flow.js';
 
-import { arrivalRate, duration, vus } from '../lib/profile.js';
+import { arrivalRate, duration, vus } from '../../lib/profile.js';
 
 const profileDuration = duration('P02_DURATION', '10m');
 
-// P-02는 기존 LT-01·LT-02·LT-06 요청 흐름을 바꾸지 않고 동시에 실행한다.
+// 기존 P-02 고정 혼합 프로파일: LT-01·LT-02·LT-06 흐름을 동시에 유지한다.
 export const options = {
     scenarios: {
         p02_itinerary_read: {
@@ -37,14 +37,6 @@ export const options = {
     },
 };
 
-export function runItineraryRead() {
-    runItineraryReadFlow();
-}
-
-export function runCompletion() {
-    runCompletionFlow();
-}
-
-export function runSse() {
-    runSseFlow();
-}
+export function runItineraryRead() { runItineraryReadFlow(); }
+export function runCompletion() { runCompletionFlow(); }
+export function runSse() { runSseFlow(); }

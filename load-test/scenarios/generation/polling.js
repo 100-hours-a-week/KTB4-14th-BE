@@ -1,7 +1,7 @@
-import { get } from '../lib/api.js';
-import { checkApiResponse } from '../lib/checks.js';
-import { arrivalRate, duration, vus } from '../lib/profile.js';
-import { currentUser, requireField } from '../lib/test-data.js';
+import { get } from '../../lib/api.js';
+import { checkApiResponse } from '../../lib/checks.js';
+import { arrivalRate, duration, vus } from '../../lib/profile.js';
+import { currentUser, requireField } from '../../lib/test-data.js';
 
 export const options = {
     scenarios: {
@@ -17,7 +17,7 @@ export const options = {
     },
 };
 
-// LT-05: 생성 요청을 새로 만들지 않고, Staging에 준비된 Job을 반복 조회한다.
+// LT-05: 새 여행을 만들지 않고 준비된 Job 상태 조회의 한계를 분리 측정한다.
 export default function () {
     const user = currentUser();
     const token = requireField(user, 'accessToken');

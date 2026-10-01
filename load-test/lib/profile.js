@@ -30,6 +30,12 @@ export function requireWriteConfirmation() {
     }
 }
 
+export function requireCompletionResetConfirmation() {
+    if (__ENV.CONFIRM_COMPLETION_RESET !== 'true') {
+        throw new Error('CONFIRM_COMPLETION_RESET=true is required for completion scenarios');
+    }
+}
+
 export function requireExternalSmokeConfirmation() {
     if (__ENV.CONFIRM_EXTERNAL_SMOKE !== 'true') {
         throw new Error('CONFIRM_EXTERNAL_SMOKE=true is required before a real AI/Kakao smoke request');

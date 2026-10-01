@@ -9,3 +9,6 @@ data/loadtest-user-ids.txt
 # Load test results
 results/*
 !results/.gitkeep
+
+# Project-local xk6 binary with the SSE extension
+.bin/

@@ -10,6 +10,10 @@ const testData = new SharedArray('load-test-users', () => {
     return parsed.users;
 });
 
+export function testUserCount() {
+    return testData.length;
+}
+
 // 읽기 시나리오는 VU가 데이터 수보다 많아도 계정을 순환할 수 있다.
 // 쓰기/SSE 시나리오는 같은 사용자 또는 일정 항목의 동시 사용을 막는다.
 export function currentUser({ unique = false } = {}) {
