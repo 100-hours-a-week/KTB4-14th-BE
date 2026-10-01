@@ -3,12 +3,9 @@ package com.audigo.domain.travel.service;
 import com.audigo.domain.travel.dto.ItineraryCompletionResponse;
 import com.audigo.domain.travel.dto.ItineraryResponse;
 import com.audigo.domain.travel.dto.RouteRecalculationResponse;
-import com.audigo.domain.travel.dto.BusArrivalLookupResponse;
-import com.audigo.domain.travel.dto.BusArrivalResponse;
 import com.audigo.domain.travel.entity.ItineraryDay;
 import com.audigo.domain.travel.entity.ItineraryItem;
 import com.audigo.domain.travel.entity.RouteSegment;
-import com.audigo.domain.travel.entity.RouteSegmentLeg;
 import com.audigo.domain.travel.entity.TravelPlan;
 import com.audigo.domain.travel.entity.TravelPlanStatus;
 import com.audigo.domain.travel.entity.TravelTransportType;
@@ -21,7 +18,6 @@ import com.audigo.global.error.BusinessException;
 import com.audigo.global.error.ErrorCode;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -42,8 +38,6 @@ public class TravelItineraryService {
     private final ItineraryItemRepository itemRepository;
     private final RouteSegmentRepository routeRepository;
     private final TravelItineraryMetadataStore metadataStore;
-    private final BusArrivalRealtimeService busArrivalRealtimeService;
-    private final TagoBusStopLookupService tagoBusStopLookupService;
     private final PublicTransportRealtimeService realtimeService;
     private final KakaoPlaceSearchService kakaoPlaceSearchService;
 
@@ -53,8 +47,6 @@ public class TravelItineraryService {
             ItineraryItemRepository itemRepository,
             RouteSegmentRepository routeRepository,
             TravelItineraryMetadataStore metadataStore,
-            BusArrivalRealtimeService busArrivalRealtimeService,
-            TagoBusStopLookupService tagoBusStopLookupService,
             PublicTransportRealtimeService realtimeService,
             KakaoPlaceSearchService kakaoPlaceSearchService
     ) {
@@ -63,8 +55,6 @@ public class TravelItineraryService {
         this.itemRepository = itemRepository;
         this.routeRepository = routeRepository;
         this.metadataStore = metadataStore;
-        this.busArrivalRealtimeService = busArrivalRealtimeService;
-        this.tagoBusStopLookupService = tagoBusStopLookupService;
         this.realtimeService = realtimeService;
         this.kakaoPlaceSearchService = kakaoPlaceSearchService;
     }
@@ -79,16 +69,11 @@ public class TravelItineraryService {
                 .sorted(java.util.Comparator.comparingInt(RouteSegment::getOrder))
                 .toList();
         enrichMissingPlaceMetadata(plan, days);
-        Map<Long, Map<Integer, BusArrivalResponse>> busArrivalsByRoute = loadBusArrivals(routes);
         Map<Long, List<RouteSegment>> routesByDay = routes.stream()
                 .collect(Collectors.groupingBy(route -> route.getFromItineraryItem().getItineraryDay().getId()));
 
         List<ItineraryResponse.ItineraryDayResponse> responseDays = days.stream()
-                .map(day -> toDayResponse(
-                        day,
-                        routesByDay.getOrDefault(day.getId(), List.of()),
-                        busArrivalsByRoute
-                ))
+                .map(day -> toDayResponse(day, routesByDay.getOrDefault(day.getId(), List.of())))
                 .toList();
         return ItineraryResponse.from(plan, responseDays);
     }
@@ -141,92 +126,16 @@ public class TravelItineraryService {
         );
     }
 
-    private ItineraryResponse.ItineraryDayResponse toDayResponse(
-            ItineraryDay day,
-            List<RouteSegment> routes,
-            Map<Long, Map<Integer, BusArrivalResponse>> busArrivalsByRoute
-    ) {
+    private ItineraryResponse.ItineraryDayResponse toDayResponse(ItineraryDay day, List<RouteSegment> routes) {
         List<ItineraryItem> items = itemRepository.findAllByItineraryDayIdOrderBySequenceAsc(day.getId());
         List<ItineraryResponse.ItineraryItemResponse> itemResponses = items.stream()
                 .map(item -> ItineraryResponse.ItineraryItemResponse.from(item, metadataStore))
                 .toList();
         List<ItineraryResponse.RouteSegmentResponse> routeResponses = routes.stream()
-                .map(route -> ItineraryResponse.RouteSegmentResponse.from(
-                        route,
-                        metadataStore.route(route.getId()),
-                        busArrivalsByRoute.getOrDefault(route.getId(), Map.of())
-                ))
+                .map(route -> ItineraryResponse.RouteSegmentResponse.from(route, metadataStore.route(route.getId())))
                 .toList();
         return new ItineraryResponse.ItineraryDayResponse(
                 day.getId(), day.getDayNumber(), day.getTravelDate(), itemResponses, routeResponses);
-    }
-
-    private Map<Long, Map<Integer, BusArrivalResponse>> loadBusArrivals(List<RouteSegment> routes) {
-        Map<Long, Map<Integer, BusArrivalResponse>> arrivalsByRoute = new HashMap<>();
-        LocalDateTime fetchedAt = LocalDateTime.now(KST);
-        for (RouteSegment route : routes) {
-            if (route == null || route.getId() == null || route.getLegs() == null) {
-                continue;
-            }
-            for (RouteSegmentLeg leg : route.getLegs()) {
-                if (!isBusLeg(leg)) {
-                    continue;
-                }
-                try {
-                    BusArrivalLookupResponse lookup = lookupBusArrivals(route, leg, fetchedAt);
-                    if (lookup == null || !lookup.available()) {
-                        continue;
-                    }
-                    for (BusArrivalResponse response : lookup.arrivals()) {
-                        arrivalsByRoute
-                                .computeIfAbsent(route.getId(), ignored -> new HashMap<>())
-                                .putIfAbsent(response.legSequence(), response);
-                    }
-                } catch (RuntimeException exception) {
-                    // TAGO는 부가정보이므로 실시간 조회 실패가 일정 조회 실패로 이어지지 않게 한다.
-                    log.warn("버스 실시간 정보 결합에 실패했지만 일정은 반환합니다. routeId={}, legSequence={}",
-                            route.getId(), leg.getSequence(), exception);
-                }
-            }
-        }
-        return arrivalsByRoute;
-    }
-
-    private BusArrivalLookupResponse lookupBusArrivals(
-            RouteSegment route,
-            RouteSegmentLeg leg,
-            LocalDateTime fetchedAt
-    ) {
-        List<TagoBusStopLookupService.TagoStopIdentifier> candidates =
-                tagoBusStopLookupService.findCandidates(route, leg);
-        for (TagoBusStopLookupService.TagoStopIdentifier candidate : candidates) {
-            try {
-                BusArrivalLookupResponse lookup = busArrivalRealtimeService.findForLeg(
-                        route,
-                        leg,
-                        candidate.cityCode(),
-                        candidate.nodeId(),
-                        fetchedAt
-                );
-                if (lookup != null && lookup.available()) {
-                    return lookup;
-                }
-            } catch (RuntimeException exception) {
-                log.warn("후보 정류소의 버스 실시간 정보 조회에 실패했습니다. routeId={}, legSequence={}, nodeId={}",
-                        route.getId(), leg.getSequence(), candidate.nodeId(), exception);
-            }
-        }
-        return BusArrivalLookupResponse.unavailable(route.getId());
-    }
-
-    private static boolean isBusLeg(RouteSegmentLeg leg) {
-        if (leg == null || leg.getMode() == null) {
-            return false;
-        }
-        String mode = leg.getMode().trim().toUpperCase(java.util.Locale.ROOT);
-        return "BUS".equals(mode)
-                || "EXPRESSBUS".equals(mode)
-                || "INTERCITY_BUS".equals(mode);
     }
 
     private void enrichMissingPlaceMetadata(TravelPlan plan, List<ItineraryDay> days) {
