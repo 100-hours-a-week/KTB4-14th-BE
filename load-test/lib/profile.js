@@ -35,3 +35,11 @@ export function requireExternalSmokeConfirmation() {
         throw new Error('CONFIRM_EXTERNAL_SMOKE=true is required before a real AI/Kakao smoke request');
     }
 }
+
+// P-01은 여행 생성이 실제 AI가 아닌 Staging AI Mock으로 라우팅됐음을 실행자가 명시해야 한다.
+// 이 플래그는 Mock 라우팅을 구성하거나 검증하지 않으며, 실제 설정 확인은 배포 단계의 책임이다.
+export function requireAiMockConfirmation() {
+    if (__ENV.CONFIRM_AI_MOCK !== 'true') {
+        throw new Error('CONFIRM_AI_MOCK=true is required for the P-01 full-generation scenario');
+    }
+}

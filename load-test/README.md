@@ -73,6 +73,7 @@ LT-05가 서로 다른 여행을 보게 되므로 넣지 않는다.
 | `scenarios/completion.js` | LT-02 | completion → itinerary 재조회 | 1 흐름/분, 5분 | 5 흐름, 약 10개 |
 | `scenarios/generation-polling.js` | LT-05 | 준비된 Job 상태 조회 | 30요청/분, 5분 | 약 150개 |
 | `scenarios/sse.js` | LT-06 | unread-count → SSE 연결 유지 | 연결 1개, 1분 | HTTP 1개 + SSE 1개 |
+| `scenarios/p01.js` | P-01 / LT-04 | 지역 조회 → 생성 → 완료 폴링 → 일정 조회 | 6 생성/시간, 1시간 | 생성 6개 + 폴링·일정 조회 |
 | `scenarios/p02.js` | P-02 | LT-01·LT-02·LT-06 동시 실행 | 읽기 13·완료 5 흐름/분, SSE 10개, 10분 | 혼합 프로파일 |
 
 도착률 executor는 로컬 장비나 Staging이 처리하지 못하면 `dropped_iterations`가 생길 수 있으므로
@@ -224,7 +225,7 @@ scp -i "<STAGING_SSH_KEY.pem>" \
   data/loadtest-user-ids.txt
 
 wc -l data/loadtest-user-ids.txt
-node scripts/initialize-test-ids.mjs
+node scripts/initData/initialize-test-ids.mjs
 ```
 
 `initialize-test-ids.mjs`는 ID가 정확히 150개이고 중복이 없는지 확인한 뒤 다음 초기값을 만든다.
@@ -245,7 +246,7 @@ node scripts/initialize-test-ids.mjs
 
 ```bash
 # 기존 토큰과 모든 리소스 ID를 지운다는 뜻이므로 최초 재구축에서만 사용
-node scripts/initialize-test-ids.mjs --force
+node scripts/initData/initialize-test-ids.mjs --force
 ```
 
 ### 3.4 사용자별 JWT 150개 발급
@@ -259,7 +260,7 @@ Secret을 `.env`나 명령행 인수에 쓰지 않는다.
 ```bash
 read -rs STAGING_JWT_SECRET && export STAGING_JWT_SECRET
 printf '\n'
-node scripts/generate-test-tokens.mjs --ttl 86400
+node scripts/initData/generate-test-tokens.mjs --ttl 86400
 unset STAGING_JWT_SECRET
 ```
 
@@ -306,7 +307,7 @@ FIRST_USER_ID="$(node -p \
 echo "FIRST_USER_ID=$FIRST_USER_ID"
 
 CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true CONFIRM_AI_MOCK=true \
-  ./scripts/seed-test-user.sh --user-id "$FIRST_USER_ID"
+  ./scripts/initData/seed-test-user.sh --user-id "$FIRST_USER_ID"
 ```
 
 시딩 도구의 실제 흐름은 다음과 같다.
@@ -336,7 +337,7 @@ mkdir -p results/past-seed
 set -o pipefail
 
 CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true CONFIRM_AI_MOCK=true \
-  ./scripts/seed-test-user.sh --user-id "$FIRST_USER_ID" --no-record \
+  ./scripts/initData/seed-test-user.sh --user-id "$FIRST_USER_ID" --no-record \
   | tee "results/past-seed/user-${FIRST_USER_ID}.log"
 ```
 
@@ -346,7 +347,7 @@ CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true CONFIRM_AI_MOCK=true \
 PAST_ARRIVAL='2026-09-01 10:00:00'
 PAST_DEPARTURE='2026-09-02 18:00:00'
 
-node scripts/generate-past-travel-sql.mjs \
+node scripts/initData/generate-past-travel-sql.mjs \
   --user-id "$FIRST_USER_ID" \
   --arrival "$PAST_ARRIVAL" \
   --departure "$PAST_DEPARTURE" \
@@ -395,7 +396,7 @@ ROLLBACK;
 ### 3.8 첫 사용자 읽기 Smoke
 
 ```bash
-./scripts/run-k6.sh scenarios/smoke.js
+./scripts/test/run-k6.sh scenarios/smoke.js
 ```
 
 기본 Smoke는 `regions`, `upcoming`, `recent`, `itinerary`, `generation status`의 GET 5개를 보낸다.
@@ -414,7 +415,7 @@ set -Eeuo pipefail
 while IFS= read -r user_id; do
   echo "=== Seeding future travel for userId ${user_id} ==="
   CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true CONFIRM_AI_MOCK=true \
-    ./scripts/seed-test-user.sh --user-id "$user_id"
+    ./scripts/initData/seed-test-user.sh --user-id "$user_id"
 done < <(
   node -e '
     const fs = require("fs");
@@ -478,7 +479,7 @@ while IFS= read -r user_id; do
 
   echo "=== Seeding second travel for userId ${user_id} ==="
   CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true CONFIRM_AI_MOCK=true \
-    ./scripts/seed-test-user.sh --user-id "$user_id" --no-record \
+    ./scripts/initData/seed-test-user.sh --user-id "$user_id" --no-record \
     | tee "$log_file"
 done < <(
   node -e '
@@ -499,7 +500,7 @@ BASH
 PAST_ARRIVAL='2026-09-01 10:00:00'
 PAST_DEPARTURE='2026-09-02 18:00:00'
 
-node scripts/generate-past-travel-sql.mjs \
+node scripts/initData/generate-past-travel-sql.mjs \
   --arrival "$PAST_ARRIVAL" \
   --departure "$PAST_DEPARTURE"
 ```
@@ -508,7 +509,7 @@ node scripts/generate-past-travel-sql.mjs \
 JSON 배열의 두 번째 사용자부터 SQL을 만들 수 있다.
 
 ```bash
-node scripts/generate-past-travel-sql.mjs \
+node scripts/initData/generate-past-travel-sql.mjs \
   --from-index 2 \
   --arrival "$PAST_ARRIVAL" \
   --departure "$PAST_DEPARTURE"
@@ -560,7 +561,7 @@ WHERE test_user.nickname REGEXP '^loadtest-[0-9]{3}$'
 두 값이 모두 150이면 최초 데이터 구축이 끝난다. 마지막으로 기본 Smoke를 한 번 더 실행한다.
 
 ```bash
-./scripts/run-k6.sh scenarios/smoke.js
+./scripts/test/run-k6.sh scenarios/smoke.js
 ```
 
 ## 4. 매 부하테스트 직전 준비
@@ -585,13 +586,13 @@ curl --fail --silent --show-error --max-time 10 "$BASE_URL/health"
 
 read -rs STAGING_JWT_SECRET && export STAGING_JWT_SECRET
 printf '\n'
-node scripts/generate-test-tokens.mjs --ttl 86400
+node scripts/initData/generate-test-tokens.mjs --ttl 86400
 unset STAGING_JWT_SECRET
 
 CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true CONFIRM_COMPLETION_RESET=true \
   ./scripts/reset-completions.sh
 
-./scripts/run-k6.sh scenarios/smoke.js
+./scripts/test/run-k6.sh scenarios/smoke.js
 ```
 
 ## 5. 권장 부하테스트 진행 순서
@@ -599,14 +600,14 @@ CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true CONFIRM_COMPLETION_RESET=true \
 ### 5.1 Smoke
 
 ```bash
-./scripts/run-k6.sh scenarios/smoke.js
+./scripts/test/run-k6.sh scenarios/smoke.js
 ```
 
 쓰기 Smoke가 필요하면 완료 상태를 즉시 되돌린다.
 
 ```bash
 CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true RUN_COMPLETION_SMOKE=true \
-  ./scripts/run-k6.sh scenarios/smoke.js
+  ./scripts/test/run-k6.sh scenarios/smoke.js
 
 CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true CONFIRM_COMPLETION_RESET=true \
   ./scripts/reset-completions.sh --count 1
@@ -617,7 +618,7 @@ CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true CONFIRM_COMPLETION_RESET=true \
 ```bash
 CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true \
 CONFIRM_EXTERNAL_SMOKE=true RUN_CREATION_SMOKE=true \
-  ./scripts/run-k6.sh scenarios/smoke.js
+  ./scripts/test/run-k6.sh scenarios/smoke.js
 ```
 
 ### 5.2 전체 Baseline 일괄 실행
@@ -630,7 +631,7 @@ CONFIRM_EXTERNAL_SMOKE=true RUN_CREATION_SMOKE=true \
 CONFIRM_STAGING=true \
 ALLOW_WRITE_TESTS=true \
 CONFIRM_COMPLETION_RESET=true \
-  ./scripts/run-baseline-suite.sh
+  ./scripts/test/run-baseline-suite.sh
 ```
 
 일괄 실행은 다음을 자동 수행한다.
@@ -670,14 +671,14 @@ Baseline은 합격 기준이 아니라 **낮고 재현 가능한 부하에서 �
 
 ```bash
 # LT-01: 13 흐름/분 × 요청 3개 = 약 39 req/분, 5분
-./scripts/run-k6.sh scenarios/itinerary-read.js
+./scripts/test/run-k6.sh scenarios/itinerary-read.js
 
 # LT-05: 약 30 req/분, 5분
-./scripts/run-k6.sh scenarios/generation-polling.js
+./scripts/test/run-k6.sh scenarios/generation-polling.js
 
 # LT-02: 1 흐름/분 × 요청 2개, 5분
 CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true \
-  ./scripts/run-k6.sh scenarios/completion.js
+  ./scripts/test/run-k6.sh scenarios/completion.js
 ```
 
 LT-02 결과와 서버 지표를 저장한 뒤, 해당 실행에서 사용한 항목만 되돌린다.
@@ -698,20 +699,43 @@ CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true CONFIRM_COMPLETION_RESET=true \
 
 ### 5.4 P-01 생성 증가 프로파일
 
-현재 자동화된 P-01 고부하는 **준비된 Job을 반복 조회하는 LT-05**다. 새로운 여행을 대량 생성하지
-않으므로 AI Mock 처리량과 생성 쓰기 성능을 측정하는 시나리오가 아니라 Backend·MySQL의 생성 상태
-조회 한계를 측정한다.
+`p01.js`는 Staging AI Mock을 전제로 **지역 조회 → 여행 생성 → 생성 상태 폴링 → 일정 조회**를 한
+사용자 흐름으로 실행한다. 따라서 여행·생성 Job·일정 데이터가 실제 Staging MySQL에 저장된다.
+실행 전 Backend가 반드시 Mock으로 라우팅되는지 확인한다. `CONFIRM_AI_MOCK=true`는 이 확인을
+명시하는 안전장치일 뿐, Mock 라우팅을 자동으로 설정하지 않는다.
+
+```bash
+# 예상 피크 G=약 5.65건/시간에 해당하는 기본 실행: 6 생성/시간, 1시간
+ALLOW_WRITE_TESTS=true CONFIRM_AI_MOCK=true \
+  ./scripts/test/run-k6.sh scenarios/p01.js
+```
+
+짧은 기능 검증은 생성 간격을 높이고 시간을 줄여 실행한다.
+
+```bash
+# 약 1분마다 생성 1건, 5분 동안 실행
+ALLOW_WRITE_TESTS=true CONFIRM_AI_MOCK=true \
+P01_CREATION_RATE_PER_HOUR=60 P01_DURATION=5m \
+  ./scripts/test/run-k6.sh scenarios/p01.js
+```
+
+P-01은 생성 요청마다 새 여행·Job·일정을 남긴다. 실행 결과의 `p01_creation_attempts`,
+`p01_generation_completed`, `p01_generation_failed`, `p01_generation_poll_requests`를 기록하고,
+생성된 `loadtest-` 사용자 데이터의 정리 기준을 정한 뒤에만 요청률을 올린다. 한 실행에서는 서로 다른
+계정을 사용하므로 현재 150명 데이터로 최대 150개 생성 흐름만 실행할 수 있다.
+
+LT-05는 새 여행을 만들지 않고 준비된 Job의 상태 조회 한계만 분리 측정할 때 사용한다.
 
 ```bash
 # 예상 피크 약 0.494 RPS에 가까운 30 req/분
 GENERATION_POLL_RATE_PER_MINUTE=30 \
 GENERATION_POLL_DURATION=10m \
-  ./scripts/run-k6.sh scenarios/generation-polling.js
+  ./scripts/test/run-k6.sh scenarios/generation-polling.js
 
 # 2배 단계
 GENERATION_POLL_RATE_PER_MINUTE=60 \
 GENERATION_POLL_DURATION=10m \
-  ./scripts/run-k6.sh scenarios/generation-polling.js
+  ./scripts/test/run-k6.sh scenarios/generation-polling.js
 ```
 
 전체 생성 흐름 LT-04는 Mock 또는 실제 외부 연동 Smoke로만 실행한다. 대량 생성 시나리오가 필요하면
@@ -723,13 +747,13 @@ P-02는 LT-01, LT-02, LT-06의 개별 Baseline이 성공한 뒤 하나의 시나
 읽기 `13 흐름/분`, 완료·재조회 `5 흐름/분`, SSE `10개`, 실행 시간 `10분`이다.
 
 ```bash
-ALLOW_WRITE_TESTS=true ./scripts/run-k6.sh scenarios/p02.js
+ALLOW_WRITE_TESTS=true ./scripts/test/run-k6.sh scenarios/p02.js
 ```
 
 요청률·연결 수·시간을 바꾸려면 같은 명령 앞에 값을 지정한다.
 
 ```bash
-ALLOW_WRITE_TESTS=true P02_DURATION=10m ITINERARY_FLOW_RATE_PER_MINUTE=13 COMPLETION_FLOW_RATE_PER_MINUTE=5 SSE_CONNECTIONS=10 ./scripts/run-k6.sh scenarios/p02.js
+ALLOW_WRITE_TESTS=true P02_DURATION=10m ITINERARY_FLOW_RATE_PER_MINUTE=13 COMPLETION_FLOW_RATE_PER_MINUTE=5 SSE_CONNECTIONS=10 ./scripts/test/run-k6.sh scenarios/p02.js
 ```
 
 P-02가 완료 처리한 항목은 결과 파일의 `completion_attempts`를 기준으로 복구한다.
@@ -741,10 +765,10 @@ CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true CONFIRM_COMPLETION_RESET=true ./scri
 SSE는 다음 순서로 별도 한계도 확인한다.
 
 ```bash
-SSE_CONNECTIONS=1  SSE_DURATION=5m  ./scripts/run-k6.sh scenarios/sse.js
-SSE_CONNECTIONS=10 SSE_DURATION=5m  ./scripts/run-k6.sh scenarios/sse.js
-SSE_CONNECTIONS=30 SSE_DURATION=10m ./scripts/run-k6.sh scenarios/sse.js
-SSE_CONNECTIONS=70 SSE_DURATION=10m ./scripts/run-k6.sh scenarios/sse.js
+SSE_CONNECTIONS=1  SSE_DURATION=5m  ./scripts/test/run-k6.sh scenarios/sse.js
+SSE_CONNECTIONS=10 SSE_DURATION=5m  ./scripts/test/run-k6.sh scenarios/sse.js
+SSE_CONNECTIONS=30 SSE_DURATION=10m ./scripts/test/run-k6.sh scenarios/sse.js
+SSE_CONNECTIONS=70 SSE_DURATION=10m ./scripts/test/run-k6.sh scenarios/sse.js
 ```
 
 70은 시스템 한계라는 뜻이 아니라 초기 탐색 단계다. 각 단계의 메모리, 연결 오류와 재실행 시 재연결
@@ -757,12 +781,12 @@ Baseline과 예상 피크가 안정적일 때만 요청률을 올린다.
 ```bash
 # LT-01 2배: 26 흐름/분 → 약 78 req/분
 ITINERARY_FLOW_RATE_PER_MINUTE=26 ITINERARY_READ_DURATION=10m \
-  ./scripts/run-k6.sh scenarios/itinerary-read.js
+  ./scripts/test/run-k6.sh scenarios/itinerary-read.js
 
 # LT-02 50회: 10 흐름/분 × 5분 = 50 iterations, HTTP 약 100개
 CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true \
 COMPLETION_FLOW_RATE_PER_MINUTE=10 COMPLETION_DURATION=5m \
-  ./scripts/run-k6.sh scenarios/completion.js
+  ./scripts/test/run-k6.sh scenarios/completion.js
 ```
 
 `completion.js`는 iteration마다 서로 다른 사용자·일정 항목을 사용한다. 현재 데이터가 150명이므로
@@ -781,6 +805,7 @@ COMPLETION_FLOW_RATE_PER_MINUTE=10 COMPLETION_DURATION=5m \
 | LT-02 | `COMPLETION_FLOW_RATE_PER_MINUTE` | `COMPLETION_DURATION` | `COMPLETION_PRE_ALLOCATED_VUS`, `COMPLETION_MAX_VUS` |
 | LT-05 | `GENERATION_POLL_RATE_PER_MINUTE` | `GENERATION_POLL_DURATION` | `GENERATION_POLL_PRE_ALLOCATED_VUS`, `GENERATION_POLL_MAX_VUS` |
 | LT-06 | `SSE_CONNECTIONS` | `SSE_DURATION` | 연결 수 자체가 VU 수 |
+| P-01 전체 생성 | `P01_CREATION_RATE_PER_HOUR` | `P01_DURATION`, `P01_POLL_TIMEOUT_SECONDS`, `P01_POLL_INTERVAL_SECONDS` | `P01_PRE_ALLOCATED_VUS`, `P01_MAX_VUS` |
 | P-02 혼합 | 위 LT-01·LT-02 요청률 + `SSE_CONNECTIONS` | `P02_DURATION` | 위 LT-01·LT-02 VU 변수 + SSE 연결 수 |
 
 LT-01과 LT-02의 rate는 HTTP 요청 수가 아니라 **사용자 흐름 수/분**이다. LT-01은 흐름당 3개,
