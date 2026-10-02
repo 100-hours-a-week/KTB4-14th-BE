@@ -61,7 +61,7 @@ public class TravelPlanService {
     @Transactional(readOnly = true)
     public TravelSummaryResponse getUpcomingTravel(Long userId) {
         return travelPlanRepository
-                .findTopByUserIdAndStatusAndConfirmedAtIsNotNullAndArrivalDatetimeGreaterThanEqualOrderByArrivalDatetimeAsc(
+                .findTopByUserIdAndStatusAndConfirmedAtIsNotNullAndDepartureDatetimeGreaterThanEqualOrderByArrivalDatetimeAsc(
                         userId,
                         TravelPlanStatus.COMPLETED,
                         LocalDate.now().atStartOfDay()

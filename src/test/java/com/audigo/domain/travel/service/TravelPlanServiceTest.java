@@ -73,7 +73,7 @@ class TravelPlanServiceTest {
         travelPlan.markCompleted();
         travelPlan.confirm(LocalDateTime.now());
         when(travelPlanRepository
-                .findTopByUserIdAndStatusAndConfirmedAtIsNotNullAndArrivalDatetimeGreaterThanEqualOrderByArrivalDatetimeAsc(
+                .findTopByUserIdAndStatusAndConfirmedAtIsNotNullAndDepartureDatetimeGreaterThanEqualOrderByArrivalDatetimeAsc(
                         org.mockito.ArgumentMatchers.eq(1L),
                         org.mockito.ArgumentMatchers.eq(TravelPlanStatus.COMPLETED),
                         any(LocalDateTime.class)
@@ -82,6 +82,26 @@ class TravelPlanServiceTest {
         var response = travelPlanService.getUpcomingTravel(1L);
 
         assertThat(response).isNotNull();
+        assertThat(response.status()).isEqualTo(TravelPlanStatus.COMPLETED);
+        assertThat(response.confirmedAt()).isEqualTo(travelPlan.getConfirmedAt());
+    }
+
+    @Test
+    void finds_current_travel_from_confirmed_completed_plans_until_departure_date() {
+        TravelPlan travelPlan = currentTravelPlan();
+        travelPlan.markCompleted();
+        travelPlan.confirm(LocalDateTime.now());
+        when(travelPlanRepository
+                .findTopByUserIdAndStatusAndConfirmedAtIsNotNullAndDepartureDatetimeGreaterThanEqualOrderByArrivalDatetimeAsc(
+                        org.mockito.ArgumentMatchers.eq(1L),
+                        org.mockito.ArgumentMatchers.eq(TravelPlanStatus.COMPLETED),
+                        any(LocalDateTime.class)
+                )).thenReturn(Optional.of(travelPlan));
+
+        var response = travelPlanService.getUpcomingTravel(1L);
+
+        assertThat(response).isNotNull();
+        assertThat(response.travelPlanId()).isEqualTo(travelPlan.getId());
         assertThat(response.status()).isEqualTo(TravelPlanStatus.COMPLETED);
         assertThat(response.confirmedAt()).isEqualTo(travelPlan.getConfirmedAt());
     }
@@ -199,6 +219,18 @@ class TravelPlanServiceTest {
 
     private TravelPlan pastTravelPlan() {
         LocalDateTime arrival = LocalDateTime.now().minusDays(3);
+        return TravelPlan.create(
+                1L,
+                Region.create("강남구", "서울특별시 강남구"),
+                arrival,
+                arrival.plusDays(2),
+                2,
+                CompanionType.FRIEND
+        );
+    }
+
+    private TravelPlan currentTravelPlan() {
+        LocalDateTime arrival = LocalDateTime.now().minusDays(1);
         return TravelPlan.create(
                 1L,
                 Region.create("강남구", "서울특별시 강남구"),
