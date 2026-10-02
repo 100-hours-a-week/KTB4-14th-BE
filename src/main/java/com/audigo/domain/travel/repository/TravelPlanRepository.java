@@ -23,6 +23,12 @@ public interface TravelPlanRepository extends JpaRepository<TravelPlan, Long> {
             LocalDateTime todayStart
     );
 
+    Optional<TravelPlan> findTopByUserIdAndStatusAndConfirmedAtIsNotNullAndDepartureDatetimeGreaterThanEqualOrderByArrivalDatetimeAsc(
+            Long userId,
+            TravelPlanStatus status,
+            LocalDateTime todayStart
+    );
+
     List<TravelPlan> findTop5ByUserIdAndStatusAndDepartureDatetimeLessThanOrderByDepartureDatetimeDesc(
             Long userId,
             TravelPlanStatus status,
@@ -36,6 +42,14 @@ public interface TravelPlanRepository extends JpaRepository<TravelPlan, Long> {
     );
 
     List<TravelPlan> findAllByUserIdOrderByCreatedAtDesc(Long userId);
+
+    boolean existsByUserIdAndStatusAndConfirmedAtIsNotNullAndIdNotAndArrivalDatetimeLessThanEqualAndDepartureDatetimeGreaterThanEqual(
+            Long userId,
+            TravelPlanStatus status,
+            Long excludedTravelPlanId,
+            LocalDateTime departureDatetime,
+            LocalDateTime arrivalDatetime
+    );
 
     long countByUserIdAndStatusAndDepartureDatetimeLessThan(
             Long userId,
