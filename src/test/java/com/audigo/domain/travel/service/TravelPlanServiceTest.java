@@ -110,12 +110,42 @@ class TravelPlanServiceTest {
         TravelPlan travelPlan = travelPlan();
         travelPlan.markCompleted();
         when(travelPlanRepository.findByIdAndUserId(10L, 1L)).thenReturn(Optional.of(travelPlan));
+        when(travelPlanRepository
+                .existsByUserIdAndStatusAndConfirmedAtIsNotNullAndIdNotAndArrivalDatetimeLessThanEqualAndDepartureDatetimeGreaterThanEqual(
+                        org.mockito.ArgumentMatchers.eq(1L),
+                        org.mockito.ArgumentMatchers.eq(TravelPlanStatus.COMPLETED),
+                        org.mockito.ArgumentMatchers.eq(10L),
+                        org.mockito.ArgumentMatchers.eq(travelPlan.getDepartureDatetime()),
+                        org.mockito.ArgumentMatchers.eq(travelPlan.getArrivalDatetime())
+                )).thenReturn(false);
 
         var response = travelPlanService.confirmTravel(1L, 10L);
 
         assertThat(travelPlan.isConfirmed()).isTrue();
         assertThat(travelPlan.getConfirmedAt()).isNotNull();
         assertThat(response.confirmedAt()).isEqualTo(travelPlan.getConfirmedAt());
+    }
+
+    @Test
+    void rejects_confirming_travel_when_confirmed_travel_period_overlaps() {
+        TravelPlan travelPlan = travelPlan();
+        travelPlan.markCompleted();
+        when(travelPlanRepository.findByIdAndUserId(10L, 1L)).thenReturn(Optional.of(travelPlan));
+        when(travelPlanRepository
+                .existsByUserIdAndStatusAndConfirmedAtIsNotNullAndIdNotAndArrivalDatetimeLessThanEqualAndDepartureDatetimeGreaterThanEqual(
+                        org.mockito.ArgumentMatchers.eq(1L),
+                        org.mockito.ArgumentMatchers.eq(TravelPlanStatus.COMPLETED),
+                        org.mockito.ArgumentMatchers.eq(10L),
+                        org.mockito.ArgumentMatchers.eq(travelPlan.getDepartureDatetime()),
+                        org.mockito.ArgumentMatchers.eq(travelPlan.getArrivalDatetime())
+                )).thenReturn(true);
+
+        assertThatThrownBy(() -> travelPlanService.confirmTravel(1L, 10L))
+                .isInstanceOfSatisfying(BusinessException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.OVERLAPPING_CONFIRMED_TRAVEL)
+                );
+
+        assertThat(travelPlan.isConfirmed()).isFalse();
     }
 
     @Test

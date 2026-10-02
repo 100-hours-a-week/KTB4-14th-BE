@@ -37,6 +37,14 @@ public interface TravelPlanRepository extends JpaRepository<TravelPlan, Long> {
 
     List<TravelPlan> findAllByUserIdOrderByCreatedAtDesc(Long userId);
 
+    boolean existsByUserIdAndStatusAndConfirmedAtIsNotNullAndIdNotAndArrivalDatetimeLessThanEqualAndDepartureDatetimeGreaterThanEqual(
+            Long userId,
+            TravelPlanStatus status,
+            Long excludedTravelPlanId,
+            LocalDateTime departureDatetime,
+            LocalDateTime arrivalDatetime
+    );
+
     long countByUserIdAndStatusAndDepartureDatetimeLessThan(
             Long userId,
             TravelPlanStatus status,
