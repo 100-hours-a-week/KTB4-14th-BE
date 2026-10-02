@@ -37,10 +37,14 @@ public class TagoBusStopLookupService {
             return List.of();
         }
 
-        String regionCityName = normalizeAdministrativeName(firstRegionToken(region.getFullName()));
+        Set<String> regionNames = regionNames(region);
+        if (regionNames.isEmpty()) {
+            return List.of();
+        }
+
         List<String> cityCodes = tagoBusStopClient.findCities().stream()
                 .filter(city -> !isBlank(city.cityCode()) && !isBlank(city.cityName()))
-                .filter(city -> matchesRegionCity(city.cityName(), regionCityName))
+                .filter(city -> matchesRegionCity(city.cityName(), regionNames))
                 .map(TagoBusStopClient.City::cityCode)
                 .map(String::trim)
                 .distinct()
@@ -60,16 +64,28 @@ public class TagoBusStopLookupService {
         return candidates.stream().toList();
     }
 
-    private static boolean matchesRegionCity(String cityName, String normalizedRegionCity) {
-        return Arrays.stream(cityName.split("/"))
+    private static boolean matchesRegionCity(String cityName, Set<String> normalizedRegionNames) {
+        return Arrays.stream(cityName.split("[/\\s]+"))
                 .map(TagoBusStopLookupService::normalizeAdministrativeName)
-                .anyMatch(normalizedRegionCity::equals);
+                .filter(name -> !name.isBlank())
+                .anyMatch(normalizedRegionNames::contains);
     }
 
-    private static String firstRegionToken(String regionName) {
-        String trimmed = regionName == null ? "" : regionName.trim();
-        int firstSpace = trimmed.indexOf(' ');
-        return firstSpace < 0 ? trimmed : trimmed.substring(0, firstSpace);
+    private static Set<String> regionNames(Region region) {
+        Set<String> names = new LinkedHashSet<>();
+        addRegionNames(names, region.getFullName());
+        addRegionNames(names, region.getName());
+        return names;
+    }
+
+    private static void addRegionNames(Set<String> names, String regionName) {
+        if (isBlank(regionName)) {
+            return;
+        }
+        Arrays.stream(regionName.trim().split("\\s+"))
+                .map(TagoBusStopLookupService::normalizeAdministrativeName)
+                .filter(name -> !name.isBlank())
+                .forEach(names::add);
     }
 
     private static String normalizeAdministrativeName(String value) {
