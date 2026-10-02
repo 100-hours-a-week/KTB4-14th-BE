@@ -25,18 +25,34 @@ export function sseUserForCurrentIteration() {
 // 연결을 유지하는 시나리오는 callback이 반환되지 않도록 SSE 스트림을 계속 열어 둔다.
 // ramp-down 또는 테스트 종료에서 k6가 해당 iteration을 중단하는 것은 정상 동작이다.
 export function runSseFlow() {
-    return subscribe({ closeAfterConnected: false });
+    return subscribe({ closeAfterConnected: false }).response;
 }
 
 // handshake Smoke는 Backend가 구독 직후 보내는 `connected` 이벤트를 받은 뒤 연결을 닫는다.
 // 이 경우 sse.open()이 HTTP 응답을 반환하므로 status 200을 명시적으로 검증할 수 있다.
 export function runSseHandshakeSmoke() {
-    return subscribe({ closeAfterConnected: true });
+    return subscribe({ closeAfterConnected: true }).response;
 }
 
-function subscribe({ closeAfterConnected }) {
-    const user = sseUserForCurrentIteration();
+// P-01 알림 전달 검증은 생성 요청 사용자와 같은 사용자로 SSE를 구독해야 한다.
+// notification 이벤트를 받으면 연결을 닫아 per-vu-iterations가 정상 종료할 수 있게 한다.
+export function waitForNotification(user, requestTimeout) {
+    return subscribe({
+        user,
+        closeAfterConnected: false,
+        closeAfterNotification: true,
+        requestTimeout,
+    });
+}
+
+function subscribe({
+    user = sseUserForCurrentIteration(),
+    closeAfterConnected,
+    closeAfterNotification = false,
+    requestTimeout,
+}) {
     const token = requireField(user, 'accessToken');
+    let notificationReceived = false;
 
     checkStatus(getUnreadCount(token), 200);
     connectionAttempts.add(1);
@@ -46,7 +62,7 @@ function subscribe({ closeAfterConnected }) {
 
     const response = sse.open(
         `${config.baseUrl}/api/notifications/subscribe`,
-        sseParams(token),
+        sseParams(token, requestTimeout),
         (client) => {
             client.on('open', () => {
                 connectionOpened.add(1);
@@ -58,6 +74,13 @@ function subscribe({ closeAfterConnected }) {
                 if (event.name === 'connected') {
                     connectedEvents.add(1);
                     if (closeAfterConnected) {
+                        client.close();
+                    }
+                }
+
+                if (event.name === 'notification') {
+                    notificationReceived = true;
+                    if (closeAfterNotification) {
                         client.close();
                     }
                 }
@@ -73,7 +96,7 @@ function subscribe({ closeAfterConnected }) {
     // Smoke mode closes deliberately after `connected`, so its HTTP 200 can be checked.
     if (!response || response.status === 0) {
         connectionErrors.add(1);
-        return response;
+        return { response, notificationReceived };
     }
 
     if (closeAfterConnected) {
@@ -83,12 +106,20 @@ function subscribe({ closeAfterConnected }) {
             connectionErrors.add(1);
         }
         checkStatus(response, 200);
-        return response;
+        return { response, notificationReceived };
+    }
+
+    if (closeAfterNotification) {
+        if (!notificationReceived) {
+            connectionErrors.add(1);
+        }
+        checkStatus(response, 200);
+        return { response, notificationReceived };
     }
 
     // 예상하지 않은 서버 종료 뒤 즉시 재구독하는 hot loop를 피한다.
     sleep(Number(__ENV.SSE_RECONNECT_DELAY_SECONDS || 1));
-    return response;
+    return { response, notificationReceived };
 }
 
 function getUnreadCount(token) {
@@ -98,7 +129,7 @@ function getUnreadCount(token) {
     );
 }
 
-function sseParams(token) {
+function sseParams(token, requestTimeout) {
     const requestParams = params('LT-06', token, 'sse_subscribe');
     return {
         ...requestParams,
@@ -107,6 +138,6 @@ function sseParams(token) {
             Accept: 'text/event-stream',
             'Cache-Control': 'no-cache',
         },
-        timeout: __ENV.SSE_REQUEST_TIMEOUT || '31m',
+        timeout: requestTimeout || __ENV.SSE_REQUEST_TIMEOUT || '31m',
     };
 }

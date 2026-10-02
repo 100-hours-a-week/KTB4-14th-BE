@@ -5,7 +5,8 @@ import { resolve } from 'node:path';
 function printUsage(output = console.error) {
     output(
         'Usage: node scripts/test/assert-k6-summary.mjs --summary <file> '
-        + '[--mode standard|sse|sse-load|sse-handshake] [--min-sse-attempts 1]'
+        + '[--mode standard|sse|sse-load|sse-handshake|p01-notification] '
+        + '[--min-sse-attempts 1] [--expected-notifications <count>]'
     );
 }
 
@@ -22,7 +23,12 @@ function positiveInteger(value, label) {
 }
 
 function readArguments(argumentsList) {
-    const options = { minSseAttempts: 1, mode: 'standard', summary: null };
+    const options = {
+        expectedNotifications: null,
+        minSseAttempts: 1,
+        mode: 'standard',
+        summary: null,
+    };
     for (let index = 0; index < argumentsList.length; index += 1) {
         const argument = argumentsList[index];
         const value = argumentsList[index + 1];
@@ -31,14 +37,17 @@ function readArguments(argumentsList) {
             options.summary = resolve(process.cwd(), value);
             index += 1;
         } else if (argument === '--mode') {
-            if (!['standard', 'sse', 'sse-load', 'sse-handshake'].includes(value)) {
-                usage('--mode must be standard, sse, sse-load, or sse-handshake');
+            if (!['standard', 'sse', 'sse-load', 'sse-handshake', 'p01-notification'].includes(value)) {
+                usage('--mode must be standard, sse, sse-load, sse-handshake, or p01-notification');
             }
             // `sse` was the original public mode. Keep it as the SSE load-mode alias.
             options.mode = value === 'sse' ? 'sse-load' : value;
             index += 1;
         } else if (argument === '--min-sse-attempts') {
             options.minSseAttempts = positiveInteger(value, '--min-sse-attempts');
+            index += 1;
+        } else if (argument === '--expected-notifications') {
+            options.expectedNotifications = positiveInteger(value, '--expected-notifications');
             index += 1;
         } else if (argument === '--help' || argument === '-h') {
             printUsage(console.log);
@@ -48,6 +57,9 @@ function readArguments(argumentsList) {
         }
     }
     if (!options.summary) usage('--summary is required');
+    if (options.mode === 'p01-notification' && options.expectedNotifications === null) {
+        usage('--expected-notifications is required for p01-notification mode');
+    }
     return options;
 }
 
@@ -116,6 +128,40 @@ if (options.mode === 'standard') {
         }
         console.log(
             `SSE handshake summary passed: attempts=${attempts}, opened=${opened}, connectedEvents=${connectedEvents}, handshake200=${handshake200}, connectionErrors=0.`
+        );
+    } else if (options.mode === 'p01-notification') {
+        const expected = options.expectedNotifications;
+        const notificationWaits = metricCount(metrics, 'p01_notification_waits', options.summary);
+        const notificationEvents = metricCount(metrics, 'p01_notification_events_received', options.summary);
+        const creationAttempts = metricCount(metrics, 'p01_creation_attempts', options.summary);
+        const generationCompleted = metricCount(metrics, 'p01_generation_completed', options.summary);
+        const failureRate = metrics.http_req_failed?.value ?? 0;
+
+        if (failureRate !== 0) {
+            usage(`${options.summary} has HTTP failure rate ${failureRate}`);
+        }
+
+        if (attempts !== expected || opened !== expected || connectedEvents !== expected) {
+            usage(
+                `${options.summary} SSE setup is not 1:1: attempts=${attempts}, opened=${opened}, `
+                + `connectedEvents=${connectedEvents}, expected=${expected}`
+            );
+        }
+        if (notificationWaits !== expected || notificationEvents !== expected) {
+            usage(
+                `${options.summary} notification delivery is not 1:1: waits=${notificationWaits}, `
+                + `events=${notificationEvents}, expected=${expected}`
+            );
+        }
+        if (creationAttempts !== expected || generationCompleted !== expected) {
+            usage(
+                `${options.summary} P-01 completion is not 1:1: creations=${creationAttempts}, `
+                + `completed=${generationCompleted}, expected=${expected}`
+            );
+        }
+        console.log(
+            `P-01 notification summary passed: users=${expected}, generationCompleted=${generationCompleted}, `
+            + `notificationEvents=${notificationEvents}, connectionErrors=0.`
         );
     } else {
         console.log(

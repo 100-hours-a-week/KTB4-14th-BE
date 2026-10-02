@@ -238,6 +238,19 @@ ALLOW_WRITE_TESTS=true \
 CONFIRM_AI_MOCK=true \
 ./scripts/test/run-k6.sh scenarios/p01/ramping-vus.js
 
+# P-01 알림 전달 검증: 사용자별 SSE 연결 → 같은 사용자의 여행 생성 → notification 수신
+CONFIRM_STAGING=true \
+ALLOW_WRITE_TESTS=true \
+CONFIRM_AI_MOCK=true \
+P01_NOTIFICATION_USERS=1 \
+./scripts/test/run-k6.sh scenarios/p01/notification-delivery.js
+
+# 위 실행의 결과 파일을 대상으로 1:1 알림 전달을 검증한다.
+node scripts/test/assert-k6-summary.mjs \
+  --summary results/<run-id>/p01-notification-delivery-summary.json \
+  --mode p01-notification \
+  --expected-notifications 1
+
 # 기존 P-02 고정 혼합 부하 + 자동 완료 복구
 CONFIRM_STAGING=true \
 ALLOW_WRITE_TESTS=true \
@@ -256,11 +269,18 @@ CONFIRM_COMPLETION_RESET=true \
 | P-01 `constant-arrival-rate`, `P01_CREATION_RATE_PER_HOUR` | 6 생성/시간 | 일정한 생성 시작률의 Backend·DB 처리량을 본다. |
 | P-01 `ramping-arrival-rate`, `P01_RAMP_*_RATE_PER_HOUR` | 6 → 12 → 30 → 60 → 6 | 여행일 전 증가·집중 패턴을 본다. stage 시간은 `P01_RAMP_*_DURATION`이다. |
 | P-01 `ramping-vus`, `P01_RAMP_VU_*` | 1 → 3 → 10 → 0 VU | 각 VU는 1회만 `지역 → 생성 → 폴링 → 일정` 전체 흐름을 실행한다. 최대 150계정이다. |
+| P-01 알림 전달, `per-vu-iterations` 2개 | 사용자 1명 × SSE 1회·생성 1회 | SSE 연결을 먼저 열고 `P01_NOTIFICATION_SSE_READY_DELAY`(기본 5초) 뒤 같은 사용자가 여행을 생성한다. `P01_NOTIFICATION_USERS`는 최대 150명이다. |
 | P-02 고정 | 13 읽기 flow/min, 5 완료 flow/min, SSE 10 | 기존 혼합 프로파일이다. `P02_DURATION`이 공통 시간이다. |
 | P-02 Ramp | 읽기 13→26→52→100→13, 완료 1→2→5→10→1, SSE 10 | 여행 당일 스파이크용이다. 읽기 `P02_ITINERARY_RAMP_*_DURATION`과 완료 `P02_COMPLETION_RAMP_*_DURATION`은 독립 설정하되 총합이 같아야 하며, SSE 시간은 그 합계로 자동 계산된다. |
 
 P-01은 실행마다 새 여행·생성 Job·일정 데이터를 Staging DB에 남긴다. 반드시 AI Mock 라우팅을 배포에서 확인하고
 `CONFIRM_AI_MOCK=true`를 넣는다. P-01 생성 데이터는 `loadtest-` 사용자와 실행 ID를 기준으로 별도 정리한다.
+
+P-01 알림 전달 시나리오는 생성 완료에 따라 Backend가 같은 사용자의 SSE로 보내는 `notification`
+이벤트를 확인한다. `p01_notification_waits`, `p01_generation_completed`,
+`p01_notification_events_received`가 모두 사용자 수와 같고 `sse_connection_errors=0`이어야 한다.
+SSE 연결 준비 시간은 `P01_NOTIFICATION_SSE_READY_DELAY`, 이벤트 대기 timeout은
+`P01_NOTIFICATION_WAIT_TIMEOUT`(기본 6분)으로 조절한다. 실제 AI가 아닌 Staging AI Mock에서만 실행한다.
 
 401/403이 발생하면 요청률을 높이지 말고 JWT Secret·토큰 TTL·Staging 접근 권한을 먼저 수정한다.
 
@@ -336,7 +356,7 @@ scenarios/
 ├── completion/  # LT-02: flow.js + constant-arrival.js + ramping-arrival.js + toggle.js
 ├── generation/  # LT-05: polling.js
 ├── sse/         # LT-06: flow.js + handshake-smoke.js + constant-vus.js + ramping-vus.js
-├── p01/         # LT-04 전체 생성: flow.js + 3가지 executor
+├── p01/         # LT-04 전체 생성 3가지 executor + notification-delivery.js
 └── p02/         # 고정 혼합과 여행 당일 Ramp 혼합
 ```
 
@@ -355,6 +375,7 @@ scenarios/
 | `p01/constant-arrival.js` | P-01/LT-04 | constant-arrival-rate | 6 생성/h, 1h |
 | `p01/ramping-arrival.js` | P-01/LT-04 | ramping-arrival-rate | 6 → 12 → 30 → 60 → 6 생성/h |
 | `p01/ramping-vus.js` | P-01/LT-04 | ramping-vus | 1 → 3 → 10 → 0 VU, VU당 1 생성 흐름 |
+| `p01/notification-delivery.js` | P-01 알림 전달 | per-vu-iterations × 2 | 사용자별 SSE 1회와 같은 사용자 생성 1회를 짝지어 `notification` 수신을 검증 |
 | `p02/constant-mix.js` | P-02 | CAR + CAR + CVU | 읽기 13, 완료 5 flow/min, SSE 10 |
 | `p02/ramping-spike.js` | P-02 | RAR + RAR + CVU | 읽기·완료 Ramp + SSE 10 |
 
