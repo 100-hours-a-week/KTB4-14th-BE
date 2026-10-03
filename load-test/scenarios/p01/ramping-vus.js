@@ -1,8 +1,5 @@
-import exec from 'k6/execution';
-import { sleep } from 'k6';
-
 import { duration, vus } from '../../lib/profile.js';
-import { testUserCount, userForIteration } from '../../lib/test-data.js';
+import { currentUser, testUserCount } from '../../lib/test-data.js';
 import { runP01GenerationFlow } from './flow.js';
 
 const stage1Vus = vus('P01_RAMP_VU_STAGE_1', 1);
@@ -31,14 +28,8 @@ export const options = {
     },
 };
 
-// ramping-vus는 default function을 반복 호출한다. 각 VU는 첫 호출에서만 생성 전체 흐름을
-// 한 번 수행하고, 완료 뒤에는 idle 상태로 남는다. 따라서 같은 계정의 반복 생성·동시 생성이 없다.
-let hasCreated = false;
+// ramping-vus는 default function을 반복 호출한다. VU마다 한 사용자만 고정 배정하고,
+// 한 번의 생성 전체 흐름이 끝난 뒤에만 다음 iteration을 시작한다.
 export default function () {
-    if (hasCreated) {
-        sleep(Number(__ENV.P01_RAMP_VU_IDLE_SECONDS || 60));
-        return;
-    }
-    hasCreated = true;
-    runP01GenerationFlow(userForIteration(exec.scenario.iterationInTest, { unique: true }));
+    runP01GenerationFlow(currentUser({ unique: true }));
 }

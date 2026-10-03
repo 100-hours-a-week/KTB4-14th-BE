@@ -11,6 +11,12 @@ cd "$ROOT_DIR"
 # 시나리오를 같은 실행 ID로 동시에 실행할 때 결과와 서버 로그를 묶기 위함이다.
 CALLER_TEST_RUN_ID="${TEST_RUN_ID:-}"
 CALLER_K6_BIN="${K6_BIN:-}"
+CALLER_K6_WEB_DASHBOARD="${K6_WEB_DASHBOARD:-}"
+CALLER_K6_WEB_DASHBOARD_HOST="${K6_WEB_DASHBOARD_HOST:-}"
+CALLER_K6_WEB_DASHBOARD_PORT="${K6_WEB_DASHBOARD_PORT:-}"
+CALLER_K6_WEB_DASHBOARD_PERIOD="${K6_WEB_DASHBOARD_PERIOD:-}"
+CALLER_K6_WEB_DASHBOARD_OPEN="${K6_WEB_DASHBOARD_OPEN:-}"
+CALLER_K6_WEB_DASHBOARD_EXPORT="${K6_WEB_DASHBOARD_EXPORT:-}"
 
 if [[ ! -f "$SCRIPT" ]]; then
   echo "Scenario file not found: $SCRIPT" >&2
@@ -31,6 +37,31 @@ fi
 if [[ -n "$CALLER_K6_BIN" ]]; then
   export K6_BIN="$CALLER_K6_BIN"
 fi
+if [[ -n "$CALLER_K6_WEB_DASHBOARD" ]]; then
+  export K6_WEB_DASHBOARD="$CALLER_K6_WEB_DASHBOARD"
+fi
+if [[ -n "$CALLER_K6_WEB_DASHBOARD_HOST" ]]; then
+  export K6_WEB_DASHBOARD_HOST="$CALLER_K6_WEB_DASHBOARD_HOST"
+fi
+if [[ -n "$CALLER_K6_WEB_DASHBOARD_PORT" ]]; then
+  export K6_WEB_DASHBOARD_PORT="$CALLER_K6_WEB_DASHBOARD_PORT"
+fi
+if [[ -n "$CALLER_K6_WEB_DASHBOARD_PERIOD" ]]; then
+  export K6_WEB_DASHBOARD_PERIOD="$CALLER_K6_WEB_DASHBOARD_PERIOD"
+fi
+if [[ -n "$CALLER_K6_WEB_DASHBOARD_OPEN" ]]; then
+  export K6_WEB_DASHBOARD_OPEN="$CALLER_K6_WEB_DASHBOARD_OPEN"
+fi
+if [[ -n "$CALLER_K6_WEB_DASHBOARD_EXPORT" ]]; then
+  export K6_WEB_DASHBOARD_EXPORT="$CALLER_K6_WEB_DASHBOARD_EXPORT"
+fi
+
+# 모든 표준 부하테스트는 로컬 k6 Web Dashboard를 기본 제공한다. 자동 브라우저
+# 열기는 창을 닫을 때까지 k6 종료가 지연될 수 있으므로 명시적으로 요청할 때만 켠다.
+export K6_WEB_DASHBOARD="${K6_WEB_DASHBOARD:-true}"
+export K6_WEB_DASHBOARD_HOST="${K6_WEB_DASHBOARD_HOST:-127.0.0.1}"
+export K6_WEB_DASHBOARD_PORT="${K6_WEB_DASHBOARD_PORT:-5665}"
+export K6_WEB_DASHBOARD_PERIOD="${K6_WEB_DASHBOARD_PERIOD:-1s}"
 
 # Detect transitive local imports too: P-02 imports the shared SSE flow rather
 # than importing k6/x/sse directly.
@@ -122,7 +153,11 @@ EOF
   fi
 fi
 
-export TEST_RUN_ID="${TEST_RUN_ID:-$(TZ=Asia/Seoul date +%Y-%m-%d-%H-%M)}"
+if [[ "$SCRIPT" == scenarios/api/completion-ramping-arrival.js || "$SCRIPT" == scenarios/api/travel-plan-create-ramping-arrival.js ]]; then
+  export TEST_RUN_ID="${TEST_RUN_ID:-$(TZ=Asia/Seoul date +%Y-%m-%d-%H-%M-%S)-single-api-$$}"
+else
+  export TEST_RUN_ID="${TEST_RUN_ID:-$(TZ=Asia/Seoul date +%Y-%m-%d-%H-%M)}"
+fi
 if [[ ! "$TEST_RUN_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
   echo "TEST_RUN_ID may contain only letters, numbers, dot, underscore, and hyphen: $TEST_RUN_ID" >&2
   exit 1
@@ -133,7 +168,14 @@ SCENARIO_NAME="${SCENARIO_NAME%.js}"
 SCENARIO_NAME="${SCENARIO_NAME//\//-}"
 RESULT_DIR="results/$TEST_RUN_ID"
 SUMMARY_FILE="$RESULT_DIR/${SCENARIO_NAME}-summary.json"
+if [[ "$SCRIPT" == scenarios/api/completion-ramping-arrival.js || "$SCRIPT" == scenarios/api/travel-plan-create-ramping-arrival.js ]]; then
+  if [[ -e "$SUMMARY_FILE" || -e "$RESULT_DIR/completion-items.json" || -e "$RESULT_DIR/generation-results.json" ]]; then
+    echo "Single API artifacts already exist in $RESULT_DIR; choose a new TEST_RUN_ID" >&2
+    exit 1
+  fi
+fi
 mkdir -p "$RESULT_DIR"
+export SINGLE_API_ARTIFACT_DIR="$RESULT_DIR"
 
 # 같은 분에 같은 시나리오를 여러 번 실행해도 기존 결과를 덮어쓰지 않는다.
 # 첫 파일은 <scenario>-summary.json, 이후 파일은 -2, -3 순서로 저장한다.
@@ -150,6 +192,9 @@ echo "scenario=$SCRIPT"
 echo "summary=$SUMMARY_FILE"
 echo "k6_bin=$SELECTED_K6"
 echo "k6_version=$SELECTED_K6_VERSION_LINE"
+if [[ "$K6_WEB_DASHBOARD" == "true" ]]; then
+  echo "web_dashboard=http://${K6_WEB_DASHBOARD_HOST}:${K6_WEB_DASHBOARD_PORT}"
+fi
 
 # 측정 전 인증을 1회 확인한다. 401/403이면 고부하 요청을 시작하지 않는다.
 node scripts/test/preflight-auth.mjs

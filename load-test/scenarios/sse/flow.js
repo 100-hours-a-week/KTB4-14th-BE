@@ -141,3 +141,51 @@ function sseParams(token, requestTimeout) {
         timeout: requestTimeout || __ENV.SSE_REQUEST_TIMEOUT || '31m',
     };
 }
+
+
+// xk6-sse v0.1.11은 JS 이벤트 루프를 차단하므로 setTimeout으로 close할 수 없다.
+// 요청 전체 수명 기한을 사용하고, connected 이후 정상 기한 만료만 별도 분류한다.
+// 이 단일 API 모드는 unread-count를 호출하지 않는다.
+export function runSingleSseSession(user, holdSeconds) {
+    const started = Date.now();
+    let connected = false;
+    let expectedExpiry = false;
+    let failed = false;
+    connectionAttempts.add(1);
+    connectionErrors.add(0);
+    sessionExpired.add(0);
+    const recordError = () => {
+        if (!failed) connectionErrors.add(1);
+        failed = true;
+    };
+    const response = sse.open(`${config.baseUrl}/api/notifications/subscribe`,
+        sseParams(requireField(user, 'accessToken'), `${holdSeconds}s`), (client) => {
+            client.on('open', () => connectionOpened.add(1));
+            client.on('event', (event) => {
+                eventsReceived.add(1);
+                if (event.name === 'connected') {
+                    connected = true;
+                    connectedEvents.add(1);
+                }
+            });
+            client.on('error', (error) => {
+                const text = String(typeof error?.error === 'function' ? error.error() : error);
+                const expired = /deadline exceeded|Client\.Timeout|request canceled.*timeout/i.test(text);
+                if (connected && expired && Date.now() - started >= holdSeconds * 1000 * 0.95) {
+                    expectedExpiry = true;
+                    client.close();
+                } else {
+                    recordError();
+                    client.close();
+                }
+            });
+        });
+    const ok = checkStatus(response, 200);
+    if (ok && connected && expectedExpiry && !failed) {
+        handshake200.add(1);
+        sessionExpired.add(1);
+    } else recordError();
+    return response;
+}
+
+const sessionExpired = new Counter('sse_session_duration_expired');

@@ -10,6 +10,223 @@ Spring Boot 소스는 변경하지 않고 `load-test/`만 사용해 **Staging Ba
 `results/YYYY-MM-DD-HH-mm/`에 저장되고, 하위 시나리오는 `itinerary-ramping-arrival-summary.json`처럼
 폴더명을 포함한 이름으로 구분된다.
 
+### 단일 API Ramp 부하테스트 — 신규 9개
+
+기존 사용자 흐름 테스트는 유지한다. 아래 시나리오는 `ramping-arrival-rate`로 **측정 iteration당 대상 API만
+1회 호출**한다. 인증 preflight·`setup()` 준비 요청은 측정 전 별도 요청이다. 부하 주입 방식 옵션화는 하지 않는다.
+알림 단건/여러 건/전체 읽음 처리와 알림 설정 PATCH는 이번 추가 대상이 아니다.
+
+| 파일 (`scenarios/api/`) | 대상 API | 환경변수 접두사 |
+| --- | --- | --- |
+| `upcoming-ramping-arrival.js` | `GET /api/travel-plans/upcoming` | `UPCOMING_RAMP` |
+| `recent-ramping-arrival.js` | `GET /api/travel-plans/recent` | `RECENT_RAMP` |
+| `itinerary-ramping-arrival.js` | `GET /api/travel-plans/{id}/itinerary` | `ITINERARY_API_RAMP` |
+| `regions-ramping-arrival.js` | `GET /api/regions` | `REGIONS_RAMP` |
+| `generation-job-ramping-arrival.js` | `GET /api/ai-generation-jobs/{id}` | `GENERATION_JOB_RAMP` |
+| `unread-count-ramping-arrival.js` | `GET /api/notifications/unread-count` | `UNREAD_COUNT_RAMP` |
+| `completion-ramping-arrival.js` | `PATCH /api/itinerary-items/{id}/completion` | `COMPLETION_API_RAMP` |
+| `travel-plan-create-ramping-arrival.js` | `POST /api/travel-plans` | `CREATE_API_RAMP` |
+| `sse-ramping-arrival.js` | `GET /api/notifications/subscribe` | `SSE_API_RAMP` |
+
+#### 6개 읽기 API: 각각 독립 실행
+
+```bash
+CONFIRM_STAGING=true \
+./scripts/test/run-k6.sh scenarios/api/upcoming-ramping-arrival.js
+
+CONFIRM_STAGING=true \
+./scripts/test/run-k6.sh scenarios/api/recent-ramping-arrival.js
+
+CONFIRM_STAGING=true \
+./scripts/test/run-k6.sh scenarios/api/itinerary-ramping-arrival.js
+
+CONFIRM_STAGING=true \
+./scripts/test/run-k6.sh scenarios/api/regions-ramping-arrival.js
+
+CONFIRM_STAGING=true \
+./scripts/test/run-k6.sh scenarios/api/generation-job-ramping-arrival.js
+
+CONFIRM_STAGING=true \
+./scripts/test/run-k6.sh scenarios/api/unread-count-ramping-arrival.js
+```
+
+| 설정 | 설명 |
+| --- | --- |
+| `CONFIRM_STAGING=true` | 필수. 운영 호스트는 차단한다. |
+| 기본 프로파일 | 시작 1 → 10 → 30 → 50 RPS, 50 RPS 유지 → 1 RPS 감소. 총 4분. |
+| 데이터 | 사용자별 JWT. 일정 조회는 `travelPlanId`, Job 조회는 `generationJobId`가 필요하다. |
+| 요청 수 | iteration당 1개이므로 flow/min 환산이 없다. 목표 RPS와 실제 RPS는 구분한다. |
+
+#### 완료 PATCH만 반복 토글 + 종료 후 리셋
+
+```bash
+# 성능 측정만 실행: 종료 후 아래 수동 리셋이 필요하다.
+CONFIRM_STAGING=true \
+ALLOW_WRITE_TESTS=true \
+CONFIRM_COMPLETION_RESET=true \
+./scripts/test/run-k6.sh scenarios/api/completion-ramping-arrival.js
+
+# 수동 리셋: 출력된 실제 run-id를 넣는다.
+CONFIRM_STAGING=true \
+ALLOW_WRITE_TESTS=true \
+CONFIRM_COMPLETION_RESET=true \
+./scripts/reset-completions.sh \
+  --items results/<run-id>/completion-items.json
+
+# 성능 측정 + 마지막 자동 리셋
+CONFIRM_STAGING=true \
+ALLOW_WRITE_TESTS=true \
+CONFIRM_COMPLETION_RESET=true \
+./scripts/test/run-completion-with-reset.sh \
+  scenarios/api/completion-ramping-arrival.js
+```
+
+| 옵션/결과 | 설명 |
+| --- | --- |
+| `ALLOW_WRITE_TESTS`, `CONFIRM_COMPLETION_RESET` | 모두 `true` 필수. |
+| `COMPLETION_API_RAMP_MAX_VUS` | 기본 100. 사용자별 항목을 VU에 고정하며, 데이터 수 초과·중복 항목은 시작 전에 거절한다. |
+| `COMPLETION_API_SETUP_TIMEOUT` | 기본 `5m`. 준비 단계에서 최대 VU에 배정된 항목의 초기 상태를 GET으로 확인한다. |
+| 측정 중 요청 | PATCH만 호출. 응답 ID·상태를 확인한 성공 뒤 `true ↔ false` 교대한다. |
+| 실패/Timeout | 다음 요청은 같은 목표값으로 재동기화한다. 재동기화 성공은 실제 전환 성공으로 집계하지 않는다. |
+| custom metrics | `completion_api_attempts`, `completion_false_to_true`, `completion_true_to_false`, `completion_state_uncertain`, `completion_state_reconfirmed` |
+| `completion-items.json` | 응답 전에 기록한 항목별 시도 metric으로 실제 요청한 userId·itemId만 저장한다. JWT는 포함하지 않는다. |
+| 자동 복구 | 실패 실행이라도 목록이 있으면 대상만 `false`로 복구한다. 목록이 없거나 복구 실패 시 전체 테스트 항목으로 fallback한다. |
+| 복구 제한 | SIGKILL·전원 종료에서는 자동 리셋을 보장하지 못한다. 실행 종료·최종 리셋은 동시 테스트가 없는 상태에서 수행한다. |
+
+기존 `completion_attempts = 앞 N개 항목` 방식은 새 반복 시나리오에 사용하지 않는다.
+`--items`는 `--summary`, `--count`, `--user-id`와 함께 사용할 수 없다. 잘못된 사용자·항목 조합은 복구하지 않는다.
+기본 100개 준비 조회는 전체 HTTP 합계에 포함되므로 POST/PATCH 병목 분석에는 아래 `phase:api_measurement` 지표를 사용한다.
+
+#### 여행 생성 POST: 고유 사용자당 1회, 시작률 증가
+
+```bash
+CONFIRM_STAGING=true \
+ALLOW_WRITE_TESTS=true \
+CONFIRM_AI_MOCK=true \
+./scripts/test/run-k6.sh \
+  scenarios/api/travel-plan-create-ramping-arrival.js
+```
+
+| 옵션/결과 | 설명 |
+| --- | --- |
+| `CONFIRM_AI_MOCK=true` | 필수. 실제 AI·카카오를 막는 Staging Mock 라우팅은 배포 환경에서 별도로 확인한다. 플래그만으로 외부 호출이 차단되는 것은 아니다. |
+| 기본 프로파일 | 1 → 3 → 5 → 10건/초 → 10건/초 유지 → 1건/초. 각 10초, 총 50초. |
+| 데이터 한도 | 약 290건 + 경계 예약 여유 1개 = 291명의 고유 사용자를 검증한다. 300명 준비 시 기본 실행 가능. |
+| 배정 | 전체 iteration 번호로 고유 사용자를 배정하고 같은 사용자를 재사용하지 않는다. 런타임 데이터 소진도 명확히 중단한다. |
+| 준비 단계 | 사용할 사용자의 `/api/travel-plans/me`를 조회한다. `GENERATING` 여행·인증 오류가 있으면 POST 부하를 시작하지 않는다. 동시 다른 실행은 금지한다. |
+| `CREATE_API_SETUP_TIMEOUT` | 기본 `5m`. 준비 조회 전체의 시간 상한. |
+| 측정 범위 | POST 접수와 `202`·반환 ID를 확인한다. 측정 중 Job 폴링·일정 조회는 하지 않는다. |
+| 결과 기록 | `generation-results.json`에 userId·travelPlanId·generationJobId 기록. 실패 또는 응답을 확인하지 못하면 ID는 null일 수 있다. |
+| 후속 확인 | 결과의 Job ID로 테스트 후 상태·실패를 확인한다. null ID는 실행 ID·사용자와 서버 로그로 추적한다. summary만으로 비동기 완료·성공을 확정하지 않는다. |
+| 데이터 정리 | 기록된 ID와 테스트 사용자 소유권을 확인한 뒤 Staging에서만 정리한다. 참조 관계가 있으므로 이 테스트는 DB 자동 삭제를 수행하지 않는다. 기존 시딩 여행 ID는 변경하지 않는다. |
+
+단계별 예상 생성 수는 `Σ((이전 rate + 목표 rate) / 2 × 단계 초)`로 계산한다. `ceil(합계) + 1`이
+사용자 수를 넘으면 요청 전 실패한다. 여러 번 실행하려면 이전 Job이 끝난 뒤 다시 실행한다.
+**300명이란 300 VU 또는 300 RPS라는 뜻이 아니며**, 이 짧은 프로파일만으로 장시간 지속 처리량을 확정하지 않는다.
+
+#### SSE: 신규 연결 시작률 증가 + 지정 시간 유지
+
+```bash
+CONFIRM_STAGING=true \
+SSE_API_HOLD_DURATION=10s \
+./scripts/test/run-k6.sh scenarios/api/sse-ramping-arrival.js
+```
+
+| 옵션/결과 | 설명 |
+| --- | --- |
+| rate 단위 | HTTP 완료 RPS가 아니라 **신규 구독 연결 시작 수/초**. 기본 1 → 2 → 3 → 5 → 5 유지 → 1 감소. |
+| `SSE_API_HOLD_DURATION` | 기본 `10s`. 연결 요청 시작부터의 전체 수명 기한이며 handshake 시간도 포함한다. |
+| VU | 기본 사전 60·최대 100. VU별 전용 사용자, 사용자 수 초과는 시작 전 차단한다. 동시에 같은 사용자의 구독이 겹치지 않는다. |
+| 연결 수 | 대략 시작률 × 유지 시간. 연결이 길수록 필요한 VU가 증가하고 부족하면 `dropped_iterations`가 생긴다. |
+| 호출 범위 | subscribe만 요청하며 unread-count를 호출하지 않는다. 이벤트 수신도 기록한다. |
+| 정상 기한 종료 | `connected` 수신 후 설정 기한의 timeout은 `sse_session_duration_expired`로 집계하고 연결 오류에서 제외한다. |
+| 실제 오류 | 기한 전 종료·연결 실패·connected 미수신은 `sse_connection_errors`로 집계한다. |
+| 종료 여유 | gracefulStop을 수명 기한 + 5초로 설정한다. 강제 중단된 연결은 정상 종료 지표를 남기지 못할 수 있다. |
+
+고정 버전 [xk6-sse v0.1.11](https://github.com/phymbert/xk6-sse/blob/v0.1.11/sse.go)은 구독 중 JS 이벤트 루프를
+차단한다. 따라서 JS 타이머로 종료하지 않고 HTTP 수명 기한을 사용하며 예상 timeout과 실제 오류를 분리한다.
+기존 `sse/constant-vus.js`·`sse/ramping-vus.js`의 동작은 유지한다.
+
+#### 공통 옵션과 결과 해석
+
+각 API의 접두사 `<PREFIX>`를 앞 표에서 선택한다.
+
+| 환경변수 | 일반 읽기·완료 기본값 | 생성 POST 기본값 | SSE 기본값 |
+| --- | --- | --- | --- |
+| `<PREFIX>_START_RPS` | 1 | 1 | 1 |
+| `<PREFIX>_STAGE_1_RPS` | 10 | 3 | 2 |
+| `<PREFIX>_STAGE_2_RPS` | 30 | 5 | 3 |
+| `<PREFIX>_PEAK_RPS` | 50 | 10 | 5 |
+| `<PREFIX>_STAGE_1_DURATION` | 30s | 10s | 30s |
+| `<PREFIX>_STAGE_2_DURATION` | 30s | 10s | 30s |
+| `<PREFIX>_UP_DURATION` | 30s | 10s | 30s |
+| `<PREFIX>_PEAK_DURATION` | 2m | 10s | 2m |
+| `<PREFIX>_DOWN_DURATION` | 30s | 10s | 30s |
+| `<PREFIX>_PRE_ALLOCATED_VUS` | 10 | 10 | 60 |
+| `<PREFIX>_MAX_VUS` | 100 | 100 | 100 |
+
+`PRE_ALLOCATED_VUS <= MAX_VUS`가 필요하다. Stage target은 이 구현에서는 양의 정수만 허용한다.
+기존 6개 단일 API Ramp 파일과 사용자 흐름 프로파일은 계속 사용할 수 있다.
+
+신규 일반 API summary에서 다음 submetric은 준비 GET을 제외한 대상 API만 집계한다.
+
+- `http_reqs{phase:api_measurement}`
+- `http_req_duration{phase:api_measurement}`
+- `http_req_failed{phase:api_measurement}`
+
+submetric의 요청 수·지연은 준비 요청을 제외하지만 summary의 `rate` 계산 시간에는 setup 시간이
+포함될 수 있다. 단계별 실제 RPS는 Dashboard/시계열의 측정 구간을 확인한다.
+
+성능 중단 기준이 아닌 항상 통과하는 threshold로 submetric을 노출한다. 준비 단계에는
+`phase:api_preparation`을 사용하며, 측정 중 executor의 `iterations`·`dropped_iterations`도 확인한다.
+SSE는 전용 `sse_connection_attempts`·`sse_connection_errors`·`sse_events_received`와 기한 종료 지표를 사용한다.
+`http_req_failed`만으로 응답 본문 오류까지 판단하지 말고 checks·API 결과를 함께 확인한다.
+
+#### 로컬 검증 (Staging·외부 API 호출 없음)
+
+```bash
+node scripts/test/single-api-local-smoke.mjs
+```
+
+| 검증 | 범위 |
+| --- | --- |
+| 실행 대상 | 127.0.0.1 Mock 서버와 임시 가짜 사용자 데이터만 사용. 실제 `.env`·JWT·운영 DB를 사용하지 않는다. |
+| 신규 9개 | inspect로 executor·stage 검증 후 낮은 요청률로 단일 API 호출 검증 |
+| 완료 처리 | 정상 교대·503 이후 재동기화·실제 항목 복구·실패 실행 자동 복구/fallback |
+| 생성 | 고유 사용자·반환 ID 기록·사용자 한도·진행 중 생성·403 차단 |
+| SSE | subscribe만 호출·이벤트 수신·수명 기한 종료·동시 사용자 중복 없음 |
+| 기존 테스트 | 기존 단일 API 6개와 사용자 흐름 시나리오 inspect 회귀 검증 |
+
+로컬 검증은 실제 Staging 배포·인증·Mock 라우팅 검증을 대체하지 않는다. 실제 환경에서는 stage를 짧게 하고
+모든 rate를 1로 낮춘 뒤 실행한다. 생성은 총 예약 수에 맞는 고유 사용자를 준비한다. 낮은 부하 Staging 결과를
+확인하기 전에는 위 기본/고부하 명령을 검증 완료로 간주하지 않는다.
+
+### 모든 실행의 k6 Web Dashboard
+
+`scripts/test/run-k6.sh`를 경유하는 모든 부하테스트는 Web Dashboard를 기본 활성화한다. 테스트가
+실행 중인 동안 브라우저에서 `http://127.0.0.1:5665`를 열어 실시간 RPS·VU·응답시간·오류율을 확인한다.
+실행이 끝나면 Dashboard 서버도 종료되므로, 결과는 `results/`의 summary JSON으로 확인한다.
+
+```bash
+# 기본 Dashboard 포트(5665)가 이미 사용 중일 때만 변경
+CONFIRM_STAGING=true \
+K6_WEB_DASHBOARD_PORT=5666 \
+./scripts/test/run-k6.sh scenarios/smoke.js
+
+# CI 등에서 Dashboard를 명시적으로 끄기
+CONFIRM_STAGING=true \
+K6_WEB_DASHBOARD=false \
+./scripts/test/run-k6.sh scenarios/smoke.js
+```
+
+| 환경변수 | 기본값 | 설명 |
+| --- | --- | --- |
+| `K6_WEB_DASHBOARD` | `true` | 모든 표준 실행의 Dashboard 활성화 여부 |
+| `K6_WEB_DASHBOARD_HOST` | `127.0.0.1` | Dashboard 바인딩 주소 |
+| `K6_WEB_DASHBOARD_PORT` | `5665` | Dashboard 포트. 병렬 실행 시 실행별로 다르게 지정한다. |
+| `K6_WEB_DASHBOARD_PERIOD` | `1s` | Dashboard 갱신 주기 |
+| `K6_WEB_DASHBOARD_OPEN` | 미설정 | `true`이면 기본 브라우저를 자동으로 연다. 창이 열려 있으면 k6 종료가 지연될 수 있어 기본으로 켜지 않는다. |
+
 ### 매 실행 전: JWT와 완료 데이터 준비
 
 ```bash
@@ -67,6 +284,132 @@ CONFIRM_COMPLETION_RESET=true \
 | `RUN_COMPLETION_SMOKE=true` | `false` | Smoke에 LT-02 쓰기·재조회를 추가한다. |
 | `run-baseline-suite.sh` | 약 16~18분 | 고정 요청률 Baseline, SSE handshake Smoke, SSE 연결 유지 검증을 순차 실행하고 완료 항목을 자동 복구한다. |
 | `ITINERARY_READ_DURATION`, `GENERATION_POLL_DURATION`, `COMPLETION_DURATION`, `SSE_DURATION` | 각 5m/5m/5m/1m | Baseline 실행 시간을 명령 앞 환경변수로 바꿀 수 있다. |
+
+### API 직접 Ramp: 단일 API 병목 확인
+
+기존 LT·P 프로파일은 실제 사용자 흐름을 재현하는 주 시나리오다. 아래 API 직접 Ramp는 한 endpoint를
+반복 호출해 Controller·서비스·SQL 병목을 분리하는 **보조 시나리오**다. 모든 읽기 시나리오는 API 하나를
+한 번만 호출하므로 `*_RPS` 값은 목표 HTTP RPS와 같다.
+
+```bash
+# API-LT-01: 내 여행 목록
+CONFIRM_STAGING=true \
+./scripts/test/run-k6.sh scenarios/api/my-travel-plans-ramping-arrival.js
+
+# API-LT-02: 내 사용자·마이페이지 정보
+CONFIRM_STAGING=true \
+./scripts/test/run-k6.sh scenarios/api/user-me-ramping-arrival.js
+
+# API-LT-03: 알림 목록
+CONFIRM_STAGING=true \
+./scripts/test/run-k6.sh scenarios/api/notifications-ramping-arrival.js
+
+# API-LT-04: 알림 설정 조회
+CONFIRM_STAGING=true \
+./scripts/test/run-k6.sh scenarios/api/notification-settings-ramping-arrival.js
+
+# API-LT-05: 여행 ID 기준 생성 상태 조회
+CONFIRM_STAGING=true \
+./scripts/test/run-k6.sh scenarios/api/travel-plan-status-ramping-arrival.js
+
+# API-LT-06: Staging loadtest 계정의 닉네임을 계속 다른 값으로 변경
+CONFIRM_STAGING=true \
+ALLOW_WRITE_TESTS=true \
+./scripts/test/run-k6.sh scenarios/api/nickname-ramping-arrival.js
+```
+
+| API 직접 Ramp | endpoint | 환경변수 접두사 | 기본 RPS 단계 |
+| --- | --- | --- | --- |
+| API-LT-01 | `GET /api/travel-plans/me` | `MY_TRAVELS_RAMP` | 1 → 10 → 30 → 50 → 1 |
+| API-LT-02 | `GET /api/users/me` | `USER_ME_RAMP` | 1 → 10 → 30 → 50 → 1 |
+| API-LT-03 | `GET /api/notifications` | `NOTIFICATIONS_RAMP` | 1 → 10 → 30 → 50 → 1 |
+| API-LT-04 | `GET /api/notification-settings` | `NOTIFICATION_SETTINGS_RAMP` | 1 → 10 → 30 → 50 → 1 |
+| API-LT-05 | `GET /api/travel-plans/{travelPlanId}/status` | `TRAVEL_PLAN_STATUS_RAMP` | 1 → 10 → 30 → 50 → 1 |
+| API-LT-06 | `PATCH /api/users/me/nickname` | `NICKNAME_RAMP` | 1 → 10 → 30 → 50 → 1 |
+
+각 접두사에 아래 suffix를 붙여 독립 조절한다. 기본 stage 시간은 `30s → 30s → 30s → 2m → 30s`이며,
+기본 VU 풀은 `PRE_ALLOCATED_VUS=10`, `MAX_VUS=100`이다.
+
+| suffix | 의미 |
+| --- | --- |
+| `_START_RPS`, `_STAGE_1_RPS`, `_STAGE_2_RPS`, `_PEAK_RPS` | 시작·중간 2단계·피크 목표 HTTP RPS |
+| `_STAGE_1_DURATION`, `_STAGE_2_DURATION`, `_UP_DURATION`, `_PEAK_DURATION`, `_DOWN_DURATION` | 각 Ramp stage 시간 |
+| `_PRE_ALLOCATED_VUS`, `_MAX_VUS` | k6가 요청률을 맞추기 위해 사용할 VU 풀 |
+
+예를 들어 내 여행 목록을 `5 → 25 → 75 → 100 → 5 RPS`로 짧게 검증하려면 다음과 같이 실행한다.
+
+```bash
+CONFIRM_STAGING=true \
+MY_TRAVELS_RAMP_START_RPS=5 \
+MY_TRAVELS_RAMP_STAGE_1_RPS=25 \
+MY_TRAVELS_RAMP_STAGE_2_RPS=75 \
+MY_TRAVELS_RAMP_PEAK_RPS=100 \
+MY_TRAVELS_RAMP_STAGE_1_DURATION=10s \
+MY_TRAVELS_RAMP_STAGE_2_DURATION=10s \
+MY_TRAVELS_RAMP_UP_DURATION=10s \
+MY_TRAVELS_RAMP_PEAK_DURATION=30s \
+MY_TRAVELS_RAMP_DOWN_DURATION=10s \
+MY_TRAVELS_RAMP_PRE_ALLOCATED_VUS=10 \
+MY_TRAVELS_RAMP_MAX_VUS=100 \
+./scripts/test/run-k6.sh scenarios/api/my-travel-plans-ramping-arrival.js
+```
+
+API-LT-06은 VU별로 `u001 ↔ u001t`처럼 4자·5자 유효 닉네임을 매 iteration마다 토글하므로 원복 없이
+반복 실행할 수 있다. 단, 실제 DB 변경을 재현하므로 `ALLOW_WRITE_TESTS=true`가 필요하며,
+`NICKNAME_RAMP_MAX_VUS`는 현재 Staging 전용 사용자 150명을 넘길 수 없다. API-LT-03은 P-01 생성 알림이 누적될수록 응답 본문도
+커질 수 있다. API-LT-04는 알림 설정 레코드가 전혀 없는 사용자에서 최초 조회 시 기본 설정을 만들 수 있으므로,
+첫 실행은 Smoke로 확인한 뒤 부하를 올린다.
+
+### 한 줄 고정 RPS 실행
+
+`run-rps.sh`는 기존 시나리오의 환경변수 단위를 바꾸지 않고, 입력한 HTTP RPS를 내부 단위로 변환한다.
+따라서 기존 `flow/min` 명령과 결과 비교 호환성을 유지하면서 짧은 명령으로 고정 처리량을 실행할 수 있다.
+
+```bash
+# LT-01 일정 조회: 50 HTTP RPS, 5분
+CONFIRM_STAGING=true ./scripts/test/run-rps.sh itinerary 50 5m
+
+# LT-05 생성 상태 폴링: 50 HTTP RPS, 5분
+CONFIRM_STAGING=true ./scripts/test/run-rps.sh generation-polling 50 5m
+
+# API 직접 부하: 내 여행 목록 100 RPS, 5분
+CONFIRM_STAGING=true ./scripts/test/run-rps.sh my-travels 100 5m
+
+# API 직접 부하: 여행 상태 조회 100 RPS, 5분
+CONFIRM_STAGING=true ./scripts/test/run-rps.sh travel-plan-status 100 5m
+
+# API 직접 쓰기: 닉네임 토글 50 RPS, 5분
+CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true \
+./scripts/test/run-rps.sh nickname 50 5m
+```
+
+```text
+Usage: CONFIRM_STAGING=true ./scripts/test/run-rps.sh <target> <http-rps> [duration]
+```
+
+| target | 실행 대상 | RPS 변환 |
+| --- | --- | --- |
+| `itinerary` | LT-01 `upcoming → recent → itinerary` | HTTP RPS × 20 = flow/min (흐름당 HTTP 3개) |
+| `generation-polling` | LT-05 Job 상태 조회 | HTTP RPS × 60 = req/min |
+| `my-travels` | `GET /api/travel-plans/me` | 입력값 그대로 HTTP RPS |
+| `user-me` | `GET /api/users/me` | 입력값 그대로 HTTP RPS |
+| `notifications` | `GET /api/notifications` | 입력값 그대로 HTTP RPS |
+| `notification-settings` | `GET /api/notification-settings` | 입력값 그대로 HTTP RPS |
+| `travel-plan-status` | `GET /api/travel-plans/{travelPlanId}/status` | 입력값 그대로 HTTP RPS |
+| `nickname` | `PATCH /api/users/me/nickname` | 입력값 그대로 HTTP RPS, `ALLOW_WRITE_TESTS=true` 필요 |
+
+RPS는 양의 정수만 지원한다. 기본 VU 풀은 RPS에 따라 자동 계산되며, 응답시간 증가로
+`dropped_iterations`가 생기면 아래 환경변수로 k6 부하 발생기 VU 풀만 조정한다.
+
+```bash
+CONFIRM_STAGING=true \
+LOADTEST_RPS_PRE_ALLOCATED_VUS=100 \
+LOADTEST_RPS_MAX_VUS=300 \
+./scripts/test/run-rps.sh itinerary 300 5m
+```
+
+P-01은 **생성 시작률**, P-02는 **읽기·완료·SSE 혼합**, SSE는 **동시 연결 수**가 핵심이므로 단일 RPS
+명령으로 축약하지 않는다. 기존 P-01/P-02/SSE 명령을 그대로 사용한다.
 
 ### LT-01: 일정 조회 (고정 / 여행 당일 Ramp)
 
@@ -232,7 +575,7 @@ ALLOW_WRITE_TESTS=true \
 CONFIRM_AI_MOCK=true \
 ./scripts/test/run-k6.sh scenarios/p01/ramping-arrival.js
 
-# P-01 동시 생성 사용자(VU) Ramp: 각 VU는 생성 전체 흐름을 한 번만 실행
+# P-01 동시 생성 사용자(VU) Ramp: 각 VU는 생성 완료 뒤 다음 여행 생성을 반복
 CONFIRM_STAGING=true \
 ALLOW_WRITE_TESTS=true \
 CONFIRM_AI_MOCK=true \
@@ -266,15 +609,52 @@ CONFIRM_COMPLETION_RESET=true \
 
 | 프로파일 / executor | 기본값 | 설명 |
 | --- | --- | --- |
-| P-01 `constant-arrival-rate`, `P01_CREATION_RATE_PER_HOUR` | 6 생성/시간 | 일정한 생성 시작률의 Backend·DB 처리량을 본다. |
-| P-01 `ramping-arrival-rate`, `P01_RAMP_*_RATE_PER_HOUR` | 6 → 12 → 30 → 60 → 6 | 여행일 전 증가·집중 패턴을 본다. stage 시간은 `P01_RAMP_*_DURATION`이다. |
-| P-01 `ramping-vus`, `P01_RAMP_VU_*` | 1 → 3 → 10 → 0 VU | 각 VU는 1회만 `지역 → 생성 → 폴링 → 일정` 전체 흐름을 실행한다. 최대 150계정이다. |
+| P-01 `constant-arrival-rate`, `P01_CREATION_RATE_PER_HOUR` | 6 생성/시간 | 일정한 생성 시작률의 Backend·DB 처리량을 본다. VU는 고정 사용자를 순차 재사용한다. |
+| P-01 `ramping-arrival-rate`, `P01_RAMP_*_RATE_PER_HOUR` | 6 → 12 → 30 → 60 → 6 | 여행일 전 증가·집중 패턴을 본다. stage 시간은 `P01_RAMP_*_DURATION`이고 VU는 고정 사용자를 순차 재사용한다. |
+| P-01 `ramping-vus`, `P01_RAMP_VU_*` | 1 → 3 → 10 → 0 VU | VU별 고정 사용자가 `지역 → 생성 → 폴링 → 일정` 전체 흐름을 완료할 때마다 반복한다. 최대 동시 VU는 150명이다. |
 | P-01 알림 전달, `per-vu-iterations` 2개 | 사용자 1명 × SSE 1회·생성 1회 | SSE 연결을 먼저 열고 `P01_NOTIFICATION_SSE_READY_DELAY`(기본 5초) 뒤 같은 사용자가 여행을 생성한다. `P01_NOTIFICATION_USERS`는 최대 150명이다. |
 | P-02 고정 | 13 읽기 flow/min, 5 완료 flow/min, SSE 10 | 기존 혼합 프로파일이다. `P02_DURATION`이 공통 시간이다. |
 | P-02 Ramp | 읽기 13→26→52→100→13, 완료 1→2→5→10→1, SSE 10 | 여행 당일 스파이크용이다. 읽기 `P02_ITINERARY_RAMP_*_DURATION`과 완료 `P02_COMPLETION_RAMP_*_DURATION`은 독립 설정하되 총합이 같아야 하며, SSE 시간은 그 합계로 자동 계산된다. |
 
-P-01은 실행마다 새 여행·생성 Job·일정 데이터를 Staging DB에 남긴다. 반드시 AI Mock 라우팅을 배포에서 확인하고
-`CONFIRM_AI_MOCK=true`를 넣는다. P-01 생성 데이터는 `loadtest-` 사용자와 실행 ID를 기준으로 별도 정리한다.
+P-01은 실행마다 새 여행·생성 Job·일정 데이터를 Staging DB에 남긴다. VU는 한 사용자에 고정되지만, 이전
+생성 전체 흐름이 끝난 뒤 같은 사용자가 다음 여행을 생성할 수 있다. 따라서 150명은 총 생성 수가 아니라
+**최대 동시 VU 수** 한도다. 반드시 AI Mock 라우팅을 배포에서 확인하고 `CONFIRM_AI_MOCK=true`를 넣는다.
+P-01 생성 데이터는 `loadtest-` 사용자와 실행 ID를 기준으로 별도 정리한다.
+
+#### P-01 API별 병목 집계
+
+P-01의 세 생성 부하 방식과 알림 전달 시나리오는 공통 생성 흐름에서 아래 지표를 자동 수집한다.
+기존 실행 명령은 그대로 사용한다. 응답시간·실패율 threshold나 자동 감속은 추가하지 않는다.
+
+| 지표 접두사 | 측정 API | 기대 상태 |
+| --- | --- | --- |
+| `p01_regions` | `GET /api/regions` | 200 |
+| `p01_travel_plan_create` | `POST /api/travel-plans` | 202 |
+| `p01_generation_status` | `GET /api/ai-generation-jobs/{jobId}` | 200 |
+| `p01_itinerary_after_generation` | `GET /api/travel-plans/{id}/itinerary` | 200 |
+
+| 접두사 뒤 suffix | summary 값 | 의미 |
+| --- | --- | --- |
+| `_requests` | `count`, `rate` | 응답이 반환돼 집계된 요청 수·실행 전체 시간 기준 초당 수 |
+| `_errors` | `count` | 기대 HTTP 상태와 다른 응답 수. 네트워크 실패의 status 0도 포함 |
+| `_failed` | `value` | 기대 HTTP 상태 불일치 비율 (0~1). 응답 본문·Job 결과 실패는 기존 checks/생성 지표로 별도 확인 |
+| `_duration` | `avg`, `p(95)`, `max` 등 | HTTP 요청 소요 시간. JSON 단위는 ms |
+| `_waiting` | `avg`, `p(95)`, `max` 등 | 응답 첫 바이트 대기 시간. JSON 단위는 ms |
+
+예를 들어 `p01_travel_plan_create_duration.p(95)`와 `p01_generation_status_duration.p(95)`를
+비교하면 생성 접수와 폴링 중 어디가 느린지 구분할 수 있다. 기존 전체 HTTP 지표도 유지한다.
+측정은 기존 HTTP 응답 직후에 수행하므로 추가 API 요청은 발생하지 않는다. 중단 당시 반환되지 않은
+요청은 집계되지 않을 수 있고, 호출하지 못한 API의 지표는 summary에 없을 수 있다.
+HTTP 200으로 반환된 Job의 `FAILED` 상태는 `_errors`가 아니라 `p01_generation_failed`에 집계된다.
+기존 실행 summary에는 이 집계를 소급 추가할 수 없으며 다음 실행부터 저장된다.
+
+로컬 집계 검증 (합성 성공·503·네트워크 실패 응답만 사용, HTTP 요청 없음):
+
+```bash
+./.bin/k6-sse run \
+  --summary-export /tmp/p01-api-metrics-summary.json \
+  scripts/test/p01-api-metrics-smoke.js
+```
 
 P-01 알림 전달 시나리오는 생성 완료에 따라 Backend가 같은 사용자의 SSE로 보내는 `notification`
 이벤트를 확인한다. `p01_notification_waits`, `p01_generation_completed`,
@@ -354,6 +734,7 @@ scenarios/
 ├── smoke.js
 ├── itinerary/   # LT-01: flow.js + constant-arrival.js + ramping-arrival.js
 ├── completion/  # LT-02: flow.js + constant-arrival.js + ramping-arrival.js + toggle.js
+├── api/         # API 직접 Ramp + 고정 RPS: 5개 읽기 endpoint + 닉네임 변경
 ├── generation/  # LT-05: polling.js
 ├── sse/         # LT-06: flow.js + handshake-smoke.js + constant-vus.js + ramping-vus.js
 ├── p01/         # LT-04 전체 생성 3가지 executor + notification-delivery.js
@@ -368,13 +749,20 @@ scenarios/
 | `completion/constant-arrival.js` | LT-02 | constant-arrival-rate | 1 flow/min, 5m |
 | `completion/ramping-arrival.js` | LT-02 | ramping-arrival-rate | 1 → 2 → 5 → 10 → 1 flow/min |
 | `completion/toggle.js` | LT-02 검증 | per-vu-iterations | 1 VU × 1회 |
+| `api/constant-arrival.js` | API 직접 고정 RPS | constant-arrival-rate | `API_TARGET`의 단일 endpoint, `API_RPS` req/s |
+| `api/my-travel-plans-ramping-arrival.js` | API-LT-01 | ramping-arrival-rate | 1 → 10 → 30 → 50 → 1 RPS |
+| `api/user-me-ramping-arrival.js` | API-LT-02 | ramping-arrival-rate | 1 → 10 → 30 → 50 → 1 RPS |
+| `api/notifications-ramping-arrival.js` | API-LT-03 | ramping-arrival-rate | 1 → 10 → 30 → 50 → 1 RPS |
+| `api/notification-settings-ramping-arrival.js` | API-LT-04 | ramping-arrival-rate | 1 → 10 → 30 → 50 → 1 RPS |
+| `api/travel-plan-status-ramping-arrival.js` | API-LT-05 | ramping-arrival-rate | 1 → 10 → 30 → 50 → 1 RPS |
+| `api/nickname-ramping-arrival.js` | API-LT-06 | ramping-arrival-rate | 1 → 10 → 30 → 50 → 1 RPS, write guard |
 | `generation/polling.js` | LT-05 | constant-arrival-rate | 30 req/min, 5m |
 | `sse/handshake-smoke.js` | LT-06 검증 | per-vu-iterations | 1 VU × 1회, `connected` 이벤트·HTTP 200 확인 |
 | `sse/constant-vus.js` | LT-06 | constant-vus | 1 연결, 1m |
 | `sse/ramping-vus.js` | LT-06 | ramping-vus | 1 → 10 → 30 → 70 → 1 연결 |
-| `p01/constant-arrival.js` | P-01/LT-04 | constant-arrival-rate | 6 생성/h, 1h |
-| `p01/ramping-arrival.js` | P-01/LT-04 | ramping-arrival-rate | 6 → 12 → 30 → 60 → 6 생성/h |
-| `p01/ramping-vus.js` | P-01/LT-04 | ramping-vus | 1 → 3 → 10 → 0 VU, VU당 1 생성 흐름 |
+| `p01/constant-arrival.js` | P-01/LT-04 | constant-arrival-rate | 6 생성/h, 1h; VU별 순차 반복 생성 |
+| `p01/ramping-arrival.js` | P-01/LT-04 | ramping-arrival-rate | 6 → 12 → 30 → 60 → 6 생성/h; VU별 순차 반복 생성 |
+| `p01/ramping-vus.js` | P-01/LT-04 | ramping-vus | 1 → 3 → 10 → 0 VU, VU별 순차 반복 생성 |
 | `p01/notification-delivery.js` | P-01 알림 전달 | per-vu-iterations × 2 | 사용자별 SSE 1회와 같은 사용자 생성 1회를 짝지어 `notification` 수신을 검증 |
 | `p02/constant-mix.js` | P-02 | CAR + CAR + CVU | 읽기 13, 완료 5 flow/min, SSE 10 |
 | `p02/ramping-spike.js` | P-02 | RAR + RAR + CVU | 읽기·완료 Ramp + SSE 10 |
@@ -1008,8 +1396,9 @@ CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true CONFIRM_COMPLETION_RESET=true \
 ### 5.4 P-01 생성 증가 프로파일
 
 P-01은 Staging AI Mock에서만 `지역 조회 → 여행 생성 → 생성 상태 폴링 → 일정 조회`를 실행한다.
-각 생성은 새 여행·Job·일정을 남긴다. 150명보다 많은 고유 생성 흐름은 데이터 재사용 대신 명확한 오류로
-중단된다.
+각 생성은 새 여행·Job·일정을 남긴다. VU 하나는 사용자 하나에 고정되고, 생성 전체 흐름을 끝낸 뒤 같은
+사용자로 다음 여행을 생성한다. 따라서 150명은 전체 생성 건수 제한이 아니라 `P01_*_MAX_VUS`와
+`P01_RAMP_VU_*`의 **최대 동시 사용자 한도**다.
 
 ```bash
 # 고정 생성 시작률
@@ -1020,14 +1409,15 @@ CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true CONFIRM_AI_MOCK=true \
 CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true CONFIRM_AI_MOCK=true \
   ./scripts/test/run-k6.sh scenarios/p01/ramping-arrival.js
 
-# 동시 생성 세션 Ramp: VU당 생성 전체 흐름 1회만 실행
+# 동시 생성 세션 Ramp: VU별 생성 전체 흐름을 순차 반복
 CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true CONFIRM_AI_MOCK=true \
   ./scripts/test/run-k6.sh scenarios/p01/ramping-vus.js
 ```
 
-`ramping-vus`는 executor만 바꾼 구현이 아니다. VU별 첫 iteration에서만 생성 흐름을 실행하고 이후에는
-idle 상태로 유지하므로 동일 계정의 반복·동시 생성이 없다. 생성 결과의 `p01_creation_attempts`,
-`p01_generation_completed`, `p01_generation_failed`, `p01_generation_poll_requests`와 DB 증가량을 함께 기록한다.
+P-01의 세 executor는 모두 VU별 사용자 고정 방식을 사용한다. 서로 다른 VU는 병렬 생성할 수 있지만,
+하나의 VU는 이전 생성·폴링·일정 조회가 끝난 뒤에만 다음 생성 iteration을 시작하므로 같은 계정의 동시
+생성은 발생하지 않는다. 생성 결과의 `p01_creation_attempts`, `p01_generation_completed`,
+`p01_generation_failed`, `p01_generation_poll_requests`와 DB 증가량을 함께 기록한다.
 
 LT-05는 새 여행을 만들지 않고 준비된 Job 상태 조회 한계만 분리 측정한다.
 
@@ -1106,6 +1496,7 @@ COMPLETION_FLOW_RATE_PER_MINUTE=10 COMPLETION_DURATION=5m \
 | LT-06 | `SSE_CONNECTIONS` | `SSE_DURATION` | 연결 수 자체가 VU 수 |
 | P-01 전체 생성 | `P01_CREATION_RATE_PER_HOUR` | `P01_DURATION`, `P01_POLL_TIMEOUT_SECONDS`, `P01_POLL_INTERVAL_SECONDS` | `P01_PRE_ALLOCATED_VUS`, `P01_MAX_VUS` |
 | P-02 혼합 | 위 LT-01·LT-02 요청률 + `SSE_CONNECTIONS` | `P02_DURATION` | 위 LT-01·LT-02 VU 변수 + SSE 연결 수 |
+| API 직접 Ramp | 각 `*_RAMP_START_RPS` ~ `*_RAMP_PEAK_RPS` | 각 `*_RAMP_*_DURATION` | 각 `*_RAMP_PRE_ALLOCATED_VUS`, `*_RAMP_MAX_VUS` |
 
 LT-01과 LT-02의 rate는 HTTP 요청 수가 아니라 **사용자 흐름 수/분**이다. LT-01은 흐름당 3개,
 LT-02는 흐름당 2개의 HTTP 요청을 보낸다. 완료 변경 요청 본문은 Backend의 전역 SNAKE_CASE 계약에

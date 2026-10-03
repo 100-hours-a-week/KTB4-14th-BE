@@ -16,7 +16,7 @@ try {
 } catch {
     fail(`BASE_URL must be an absolute URL: ${baseUrl}`);
 }
-if (parsedUrl.hostname.toLowerCase() === 'api.audigo.kr') fail('production BASE_URL is blocked');
+if (parsedUrl.hostname.toLowerCase().replace(/\.+$/, '') === 'api.audigo.kr') fail('production BASE_URL is blocked');
 
 const dataPath = resolve(process.cwd(), process.env.TEST_DATA_FILE || 'data/test-ids.json');
 let users;

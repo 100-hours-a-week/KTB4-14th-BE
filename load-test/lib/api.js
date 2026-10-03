@@ -26,11 +26,13 @@ export function params(scenario, accessToken, name, overrides = {}) {
 
         // k6 결과에서도 시나리오별로
         // 응답시간과 오류율을 구분할 수 있도록 Tag를 추가한다.
+        ...overrides,
+        // 부분 tags override가 API 이름·시나리오 태그를 제거하지 않도록 병합한다.
         tags: {
             scenario,
             name,
+            ...overrides?.tags,
         },
-        ...overrides,
     };
 }
 

@@ -8,7 +8,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT_DIR"
 
 case "$SCRIPT" in
-  scenarios/completion/constant-arrival.js|scenarios/completion/ramping-arrival.js|scenarios/completion/toggle.js|scenarios/p02/constant-mix.js|scenarios/p02/ramping-spike.js) ;;
+  scenarios/api/completion-ramping-arrival.js|scenarios/completion/constant-arrival.js|scenarios/completion/ramping-arrival.js|scenarios/completion/toggle.js|scenarios/p02/constant-mix.js|scenarios/p02/ramping-spike.js) ;;
   *)
     echo "Automatic completion reset only supports completion or P-02 scenarios: $SCRIPT" >&2
     exit 1
@@ -39,30 +39,59 @@ SCENARIO_NAME="${SCRIPT#scenarios/}"
 SCENARIO_NAME="${SCENARIO_NAME%.js}"
 SCENARIO_NAME="${SCENARIO_NAME//\//-}"
 SUMMARY_FILE="$RESULT_DIR/${SCENARIO_NAME}-summary.json"
+if [[ "$SCRIPT" == scenarios/api/completion-ramping-arrival.js && -d "$RESULT_DIR" ]]; then
+  echo "Repeated completion result directory already exists: $RESULT_DIR; choose a new TEST_RUN_ID" >&2
+  exit 1
+fi
 mkdir -p "$RESULT_DIR"
 if [[ -e "$SUMMARY_FILE" ]]; then
   echo "Result already exists and will not be overwritten: $SUMMARY_FILE" >&2
   exit 1
 fi
 
+INTERRUPTED_STATUS=0
+# 터미널 Ctrl-C로 k6/tee가 종료돼도 래퍼는 복구 단계까지 계속한다.
+trap 'INTERRUPTED_STATUS=130' INT
+trap 'INTERRUPTED_STATUS=143' TERM
+trap 'INTERRUPTED_STATUS=129' HUP
 set +e
 ./scripts/test/run-k6.sh "$SCRIPT" "$@" 2>&1 | tee "$RESULT_DIR/performance.log"
 K6_STATUS=${PIPESTATUS[0]}
+if (( INTERRUPTED_STATUS != 0 )); then K6_STATUS=$INTERRUPTED_STATUS; fi
 set -e
 
 RESET_LOG="$RESULT_DIR/completion-reset.log"
-if [[ -f "$SUMMARY_FILE" ]]; then
+if [[ "$SCRIPT" == scenarios/api/completion-ramping-arrival.js && -f "$RESULT_DIR/completion-items.json" ]]; then
+  echo 'Resetting repeated completion items from manifest (not iteration count).' | tee "$RESET_LOG"
+  set +e
+  ./scripts/reset-completions.sh --data "${TEST_DATA_FILE:-data/test-ids.json}" --items "$RESULT_DIR/completion-items.json" 2>&1 | tee -a "$RESET_LOG"
+  RESET_STATUS=${PIPESTATUS[0]}
+  set -e
+  if (( RESET_STATUS != 0 )); then
+    echo 'Manifest reset failed; resetting all configured test items.' | tee -a "$RESET_LOG"
+    set +e
+    ./scripts/reset-completions.sh --data "${TEST_DATA_FILE:-data/test-ids.json}" 2>&1 | tee -a "$RESET_LOG"
+    RESET_STATUS=${PIPESTATUS[0]}
+    set -e
+  fi
+elif [[ "$SCRIPT" == scenarios/api/completion-ramping-arrival.js ]]; then
+  echo 'Repeated completion manifest missing; resetting all configured test items.' | tee "$RESET_LOG"
+  set +e
+  ./scripts/reset-completions.sh --data "${TEST_DATA_FILE:-data/test-ids.json}" 2>&1 | tee -a "$RESET_LOG"
+  RESET_STATUS=${PIPESTATUS[0]}
+  set -e
+elif [[ -f "$SUMMARY_FILE" ]]; then
   echo "Resetting items selected from $SUMMARY_FILE" | tee "$RESET_LOG"
   set +e
   CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true CONFIRM_COMPLETION_RESET=true TEST_RUN_ID="$TEST_RUN_ID-reset" \
-    ./scripts/reset-completions.sh --summary "$SUMMARY_FILE" 2>&1 | tee -a "$RESET_LOG"
+    ./scripts/reset-completions.sh --data "${TEST_DATA_FILE:-data/test-ids.json}" --summary "$SUMMARY_FILE" 2>&1 | tee -a "$RESET_LOG"
   RESET_STATUS=${PIPESTATUS[0]}
   set -e
   if (( RESET_STATUS != 0 )); then
     echo 'Summary did not identify reset items; resetting every configured test itinerary item (safe fallback).' | tee -a "$RESET_LOG"
     set +e
     CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true CONFIRM_COMPLETION_RESET=true TEST_RUN_ID="$TEST_RUN_ID-reset-fallback" \
-      ./scripts/reset-completions.sh 2>&1 | tee -a "$RESET_LOG"
+      ./scripts/reset-completions.sh --data "${TEST_DATA_FILE:-data/test-ids.json}" 2>&1 | tee -a "$RESET_LOG"
     RESET_STATUS=${PIPESTATUS[0]}
     set -e
   fi
@@ -70,7 +99,7 @@ else
   echo 'No summary was created; resetting every configured test itinerary item (safe fallback).' | tee "$RESET_LOG"
   set +e
   CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true CONFIRM_COMPLETION_RESET=true TEST_RUN_ID="$TEST_RUN_ID-reset-fallback" \
-    ./scripts/reset-completions.sh 2>&1 | tee -a "$RESET_LOG"
+    ./scripts/reset-completions.sh --data "${TEST_DATA_FILE:-data/test-ids.json}" 2>&1 | tee -a "$RESET_LOG"
   RESET_STATUS=${PIPESTATUS[0]}
   set -e
 fi

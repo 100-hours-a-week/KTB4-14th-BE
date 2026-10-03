@@ -5,6 +5,7 @@ import { get, post } from '../../lib/api.js';
 import { checkApiResponse, responseData } from '../../lib/checks.js';
 import { requireAiMockConfirmation, requireWriteConfirmation } from '../../lib/profile.js';
 import { requireField } from '../../lib/test-data.js';
+import { recordP01ApiResponse } from './metrics.js';
 
 const creationRequest = JSON.parse(open(__ENV.CREATE_REQUEST_FILE || '../../data/create-request.json'));
 const pollIntervalSeconds = positiveInteger('P01_POLL_INTERVAL_SECONDS', 1);
@@ -31,11 +32,11 @@ export function runP01GenerationFlow(user) {
     const token = requireField(user, 'accessToken');
 
     group('P-01 LT-04 full generation', () => {
-        requireSuccess(get('/api/regions', 'LT-04', token, 'regions'), 200, 'region lookup');
+        requireSuccess(get('/api/regions', 'LT-04', token, 'regions'), 200, 'region lookup', 'regions');
 
         creationAttempts.add(1);
         const created = post('/api/travel-plans', creationRequest, 'LT-04', token, 'travel_plan_create');
-        requireSuccess(created, 202, 'travel plan creation');
+        requireSuccess(created, 202, 'travel plan creation', 'travel_plan_create');
 
         const createdData = responseData(created);
         const travelPlanId = createdData?.travel_plan_id;
@@ -48,7 +49,8 @@ export function runP01GenerationFlow(user) {
         requireSuccess(
             get(`/api/travel-plans/${travelPlanId}/itinerary`, 'LT-04', token, 'itinerary_after_generation'),
             200,
-            'generated itinerary lookup'
+            'generated itinerary lookup',
+            'itinerary_after_generation'
         );
     });
 }
@@ -58,7 +60,7 @@ function waitForGeneration(token, generationJobId) {
     while (Date.now() < deadline) {
         const statusResponse = get(`/api/ai-generation-jobs/${generationJobId}`, 'LT-04', token, 'generation_status');
         generationPollRequests.add(1);
-        requireSuccess(statusResponse, 200, 'generation status lookup');
+        requireSuccess(statusResponse, 200, 'generation status lookup', 'generation_status');
 
         const status = responseData(statusResponse);
         if (status?.status === 'COMPLETED') {
@@ -79,7 +81,8 @@ function waitForGeneration(token, generationJobId) {
     throw new Error(`Generation job ${generationJobId} did not complete within ${pollTimeoutSeconds}s`);
 }
 
-function requireSuccess(response, expectedStatus, operation) {
+function requireSuccess(response, expectedStatus, operation, metricName) {
+    recordP01ApiResponse(metricName, response, expectedStatus);
     if (!checkApiResponse(response, expectedStatus)) {
         throw new Error(`${operation} returned HTTP ${response.status}`);
     }

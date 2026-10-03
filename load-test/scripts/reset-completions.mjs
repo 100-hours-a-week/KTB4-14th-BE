@@ -10,7 +10,7 @@ function usage(message) {
     console.error(
         'Usage: CONFIRM_STAGING=true ALLOW_WRITE_TESTS=true CONFIRM_COMPLETION_RESET=true '
         + 'node scripts/reset-completions.mjs '
-        + '[--data data/test-ids.json] [--user-id <id> | --count <n> | --summary <file>] '
+        + '[--data data/test-ids.json] [--user-id <id> | --count <n> | --summary <file> | --items <file>] '
         + '[--delay-ms 100]'
     );
     process.exit(1);
@@ -34,6 +34,7 @@ function readArguments(argumentsList) {
         delayMs: nonNegativeInteger(process.env.RESET_COMPLETION_DELAY_MS || DEFAULT_DELAY_MS, 'delay'),
         count: null,
         summary: null,
+        items: null,
         userId: null,
     };
 
@@ -54,6 +55,10 @@ function readArguments(argumentsList) {
             if (!value) usage('--summary requires a file path');
             options.summary = resolve(process.cwd(), value);
             index += 1;
+        } else if (argument === '--items') {
+            if (!value) usage('--items requires a file path');
+            options.items = resolve(process.cwd(), value);
+            index += 1;
         } else if (argument === '--delay-ms') {
             options.delayMs = nonNegativeInteger(value, '--delay-ms');
             index += 1;
@@ -63,8 +68,8 @@ function readArguments(argumentsList) {
             usage(`unknown option: ${argument}`);
         }
     }
-    const selectors = [options.userId, options.count, options.summary].filter((value) => value !== null);
-    if (selectors.length > 1) usage('--user-id, --count, and --summary are mutually exclusive');
+    const selectors = [options.userId, options.count, options.summary, options.items].filter((value) => value !== null);
+    if (selectors.length > 1) usage('--user-id, --count, and --summary, and --items are mutually exclusive');
     return options;
 }
 
@@ -87,7 +92,7 @@ function stagingBaseUrl() {
         usage(`BASE_URL must be an absolute URL: ${value}`);
     }
     if (!['http:', 'https:'].includes(parsed.protocol)) usage('BASE_URL must use HTTP(S)');
-    if (parsed.hostname.toLowerCase() === 'api.audigo.kr') usage('Reset against production is blocked');
+    if (parsed.hostname.toLowerCase().replace(/\.+$/, '') === 'api.audigo.kr') usage('Reset against production is blocked');
     return value.replace(/\/$/, '');
 }
 
@@ -98,6 +103,9 @@ function countFromSummary(path) {
     } catch (error) {
         usage(`could not read valid k6 summary JSON from ${path}: ${error.message}`);
     }
+    if (Object.keys(summary.metrics || {}).some((name) => /^completion_item_\d+_attempts$/.test(name))) {
+        usage('repeated completion requires --items completion-items.json, not an iteration count');
+    }
     const count = summary?.metrics?.completion_attempts?.count
         ?? summary?.metrics?.completion_toggle_attempts?.count
         ?? summary?.metrics?.iterations?.count;
@@ -107,7 +115,7 @@ function countFromSummary(path) {
     return count;
 }
 
-function readUsers(path, { selectedUserId, selectedCount }) {
+function readUsers(path, { selectedUserId, selectedCount, selectedItems = null }) {
     let parsed;
     try {
         parsed = JSON.parse(readFileSync(path, 'utf8'));
@@ -121,6 +129,18 @@ function readUsers(path, { selectedUserId, selectedCount }) {
     let users = selectedUserId === null
         ? parsed.users
         : parsed.users.filter((user) => user.userId === selectedUserId);
+    if (selectedItems !== null) {
+        if (!Array.isArray(selectedItems)) usage('items manifest requires an items array');
+        const seen = new Set();
+        users = selectedItems.map((item) => {
+            if (!Number.isSafeInteger(item?.userId) || !Number.isSafeInteger(item?.itineraryItemId) || seen.has(item.itineraryItemId)) usage('invalid or duplicate completion manifest item');
+            seen.add(item.itineraryItemId);
+            const user = parsed.users.find((entry) => entry.userId === item.userId && entry.itineraryItemId === item.itineraryItemId);
+            if (!user) usage(`manifest item ${item.itineraryItemId} does not match configured user ${item.userId}`);
+            return user;
+        });
+        if (users.length === 0) return [];
+    }
     if (users.length === 0) usage(`userId ${selectedUserId} was not found in ${path}`);
     if (selectedCount !== null) {
         if (selectedCount > users.length) {
@@ -195,13 +215,21 @@ async function main() {
     requireResetGuard();
     const baseUrl = stagingBaseUrl();
     const selectedCount = options.summary === null ? options.count : countFromSummary(options.summary);
+    let selectedItems = null;
+    if (options.items !== null) {
+        try { selectedItems = JSON.parse(readFileSync(options.items, 'utf8')).items; }
+        catch (error) { usage(`could not read completion items: ${error.message}`); }
+        if (!Array.isArray(selectedItems)) usage('items manifest requires an items array');
+    }
     const users = readUsers(options.data, {
         selectedUserId: options.userId,
         selectedCount,
+        selectedItems,
     });
     const runId = process.env.TEST_RUN_ID || `reset-completion-${new Date().toISOString().replace(/[-:.]/g, '')}`;
 
     console.log(`Resetting ${users.length} completion item(s) sequentially...`);
+    if (options.items !== null) console.log(`Selected from completion items: ${options.items}`);
     if (options.summary !== null) console.log(`Selected from k6 summary: ${options.summary}`);
     for (let index = 0; index < users.length; index += 1) {
         await resetCompletion(baseUrl, runId, users[index]);

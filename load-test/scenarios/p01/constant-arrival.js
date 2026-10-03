@@ -1,8 +1,11 @@
-import exec from 'k6/execution';
-
 import { arrivalRate, duration, vus } from '../../lib/profile.js';
-import { userForIteration } from '../../lib/test-data.js';
+import { currentUser, testUserCount } from '../../lib/test-data.js';
 import { runP01GenerationFlow } from './flow.js';
+
+const maxVUs = vus('P01_MAX_VUS', 20);
+if (maxVUs > testUserCount()) {
+    throw new Error(`P01_MAX_VUS (${maxVUs}) exceeds configured test users (${testUserCount()})`);
+}
 
 export const options = {
     scenarios: {
@@ -13,13 +16,14 @@ export const options = {
             timeUnit: '1h',
             duration: duration('P01_DURATION', '1h'),
             preAllocatedVUs: vus('P01_PRE_ALLOCATED_VUS', 2),
-            maxVUs: vus('P01_MAX_VUS', 20),
+            maxVUs,
             gracefulStop: duration('P01_GRACEFUL_STOP', '5m'),
         },
     },
 };
 
 export default function () {
-    // 도착률 실행 하나마다 서로 다른 계정을 써서 동시 생성·데이터 매핑 충돌을 막는다.
-    runP01GenerationFlow(userForIteration(exec.scenario.iterationInTest, { unique: true }));
+    // VU마다 한 사용자를 고정 배정한다. VU의 iteration은 직렬이므로 같은 사용자의
+    // 다음 여행 생성은 이전 생성·폴링·일정 조회가 모두 끝난 뒤에만 시작된다.
+    runP01GenerationFlow(currentUser({ unique: true }));
 }

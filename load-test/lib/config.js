@@ -29,7 +29,7 @@ if (!urlMatch) {
 
 // 설계상 운영 API에는 어떠한 부하 요청도 보내지 않는다. 이 차단은
 // 환경변수로 우회할 수 없으며, Staging 실행 의도를 명시해야 한다.
-if (urlMatch[1].toLowerCase() === 'api.audigo.kr') {
+if (urlMatch[1].toLowerCase().replace(/\.+$/, '') === 'api.audigo.kr') {
     throw new Error(`Load test against production is blocked: ${BASE_URL}`);
 }
 
