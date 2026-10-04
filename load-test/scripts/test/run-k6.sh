@@ -63,6 +63,10 @@ export K6_WEB_DASHBOARD_HOST="${K6_WEB_DASHBOARD_HOST:-127.0.0.1}"
 export K6_WEB_DASHBOARD_PORT="${K6_WEB_DASHBOARD_PORT:-5665}"
 export K6_WEB_DASHBOARD_PERIOD="${K6_WEB_DASHBOARD_PERIOD:-1s}"
 
+# k6 기본 요약은 p(95)까지만 계산한다. 꼬리 지연 분석을 위해 p(99)를 기본 포함하며,
+# 터미널 요약과 --summary-export JSON에 모두 반영된다. 실행 시 같은 변수로 덮어쓸 수 있다.
+export K6_SUMMARY_TREND_STATS="${K6_SUMMARY_TREND_STATS:-avg,min,med,max,p(90),p(95),p(99)}"
+
 # Detect transitive local imports too: P-02 imports the shared SSE flow rather
 # than importing k6/x/sse directly.
 scenario_requires_sse() {
