@@ -2,6 +2,7 @@ plugins {
     id 'java'
     id 'org.springframework.boot' version '4.0.6'
     id 'io.spring.dependency-management' version '1.1.7'
+    id 'io.sentry.jvm.gradle' version '6.23.0'
 }
 
 group = 'com.audigo'
@@ -33,4 +34,12 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform()
+}
+
+sentry {
+    includeSourceContext = true
+
+    org = "30659d67b08a"
+    projectName = "audigo"
+    authToken = System.getenv("SENTRY_AUTH_TOKEN")
 }

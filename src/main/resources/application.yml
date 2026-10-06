@@ -73,3 +73,8 @@ audigo:
     connect-timeout-seconds: ${AUDIGO_AI_CONNECT_TIMEOUT_SECONDS:5}
     read-timeout-seconds: ${AUDIGO_AI_READ_TIMEOUT_SECONDS:330}
     job-timeout-seconds: ${AUDIGO_AI_JOB_TIMEOUT_SECONDS:300}
+
+sentry:
+  dsn: ${SENTRY_DSN}
+  environment: ${SPRING_PROFILES_ACTIVE:local}
+  traces-sample-rate: 0.1
