@@ -130,7 +130,7 @@ public class TravelItineraryService {
             ItineraryDay day,
             List<RouteSegment> routes
     ) {
-        List<ItineraryItem> items = itemRepository.findAllByItineraryDayIdOrderBySequenceAsc(day.getId());
+        List<ItineraryItem> items = itemRepository.findAllWithPlaceByItineraryDayIdOrderBySequenceAsc(day.getId());
         List<ItineraryResponse.ItineraryItemResponse> itemResponses = items.stream()
                 .map(item -> ItineraryResponse.ItineraryItemResponse.from(item, metadataStore))
                 .toList();
@@ -146,7 +146,7 @@ public class TravelItineraryService {
 
     private void enrichMissingPlaceMetadata(TravelPlan plan, List<ItineraryDay> days) {
         for (ItineraryDay day : days) {
-            for (ItineraryItem item : itemRepository.findAllByItineraryDayIdOrderBySequenceAsc(day.getId())) {
+            for (ItineraryItem item : itemRepository.findAllWithPlaceByItineraryDayIdOrderBySequenceAsc(day.getId())) {
                 if (metadataStore.place(item.getId()) != null) {
                     continue;
                 }
