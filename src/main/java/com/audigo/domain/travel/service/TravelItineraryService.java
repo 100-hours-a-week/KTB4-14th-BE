@@ -68,13 +68,20 @@ public class TravelItineraryService {
         List<RouteSegment> routes = routeRepository.findAllWithLegsByTravelPlanId(travelPlanId).stream()
                 .sorted(java.util.Comparator.comparingInt(RouteSegment::getOrder))
                 .toList();
-        enrichMissingPlaceMetadata(plan, days);
+
+        List<ItineraryItem> items = itemRepository
+                .findAllWithPlaceByTravelPlanIdOrderByDayNumberAndSequence(travelPlanId);
+        Map<Long, List<ItineraryItem>> itemsByDay = items.stream()
+                .collect(Collectors.groupingBy(item -> item.getItineraryDay().getId()));
+
+        enrichMissingPlaceMetadata(plan, items);
         Map<Long, List<RouteSegment>> routesByDay = routes.stream()
                 .collect(Collectors.groupingBy(route -> route.getFromItineraryItem().getItineraryDay().getId()));
 
         List<ItineraryResponse.ItineraryDayResponse> responseDays = days.stream()
                 .map(day -> toDayResponse(
                         day,
+                        itemsByDay.getOrDefault(day.getId(), List.of()),
                         routesByDay.getOrDefault(day.getId(), List.of())
                 ))
                 .toList();
@@ -128,9 +135,9 @@ public class TravelItineraryService {
 
     private ItineraryResponse.ItineraryDayResponse toDayResponse(
             ItineraryDay day,
+            List<ItineraryItem> items,
             List<RouteSegment> routes
     ) {
-        List<ItineraryItem> items = itemRepository.findAllWithPlaceByItineraryDayIdOrderBySequenceAsc(day.getId());
         List<ItineraryResponse.ItineraryItemResponse> itemResponses = items.stream()
                 .map(item -> ItineraryResponse.ItineraryItemResponse.from(item, metadataStore))
                 .toList();
@@ -144,31 +151,29 @@ public class TravelItineraryService {
                 day.getId(), day.getDayNumber(), day.getTravelDate(), itemResponses, routeResponses);
     }
 
-    private void enrichMissingPlaceMetadata(TravelPlan plan, List<ItineraryDay> days) {
-        for (ItineraryDay day : days) {
-            for (ItineraryItem item : itemRepository.findAllWithPlaceByItineraryDayIdOrderBySequenceAsc(day.getId())) {
-                if (metadataStore.place(item.getId()) != null) {
-                    continue;
-                }
-                String providerPlaceId = item.getTravelPlanPlace().getPlace().getProviderPlaceId();
-                try {
-                    List<PlaceSearchItemResponse> candidates = kakaoPlaceSearchService
-                            .search(plan.getRegion().getId(), providerPlaceId, 1, 15)
-                            .places();
-                    candidates.stream()
-                            .filter(candidate -> providerPlaceId.equals(candidate.providerPlaceId()))
-                            .findFirst()
-                            .ifPresent(candidate -> metadataStore.putPlace(item.getId(),
-                                    new TravelItineraryMetadataStore.PlaceMetadata(
-                                            candidate.placeName(),
-                                            candidate.roadAddress() == null || candidate.roadAddress().isBlank()
-                                                    ? candidate.address() : candidate.roadAddress(),
-                                            candidate.latitude(),
-                                            candidate.longitude()
-                                    )));
-                } catch (RuntimeException ignored) {
-                    // 장소 보강이 일시적으로 불가능해도 저장된 provider 식별자로 일정은 조회한다.
-                }
+    private void enrichMissingPlaceMetadata(TravelPlan plan, List<ItineraryItem> items) {
+        for (ItineraryItem item : items) {
+            if (metadataStore.place(item.getId()) != null) {
+                continue;
+            }
+            String providerPlaceId = item.getTravelPlanPlace().getPlace().getProviderPlaceId();
+            try {
+                List<PlaceSearchItemResponse> candidates = kakaoPlaceSearchService
+                        .search(plan.getRegion().getId(), providerPlaceId, 1, 15)
+                        .places();
+                candidates.stream()
+                        .filter(candidate -> providerPlaceId.equals(candidate.providerPlaceId()))
+                        .findFirst()
+                        .ifPresent(candidate -> metadataStore.putPlace(item.getId(),
+                                new TravelItineraryMetadataStore.PlaceMetadata(
+                                        candidate.placeName(),
+                                        candidate.roadAddress() == null || candidate.roadAddress().isBlank()
+                                                ? candidate.address() : candidate.roadAddress(),
+                                        candidate.latitude(),
+                                        candidate.longitude()
+                                )));
+            } catch (RuntimeException ignored) {
+                // 장소 보강이 일시적으로 불가능해도 저장된 provider 식별자로 일정은 조회한다.
             }
         }
     }

@@ -26,4 +26,17 @@ public interface ItineraryItemRepository extends JpaRepository<ItineraryItem, Lo
     List<ItineraryItem> findAllWithPlaceByItineraryDayIdOrderBySequenceAsc(
             @Param("itineraryDayId") Long itineraryDayId
     );
+
+    @Query("""
+    select item
+    from ItineraryItem item
+    join fetch item.itineraryDay day
+    join fetch item.travelPlanPlace planPlace
+    join fetch planPlace.place
+    where day.travelPlan.id = :travelPlanId
+    order by day.dayNumber asc, item.sequence asc
+    """)
+    List<ItineraryItem> findAllWithPlaceByTravelPlanIdOrderByDayNumberAndSequence(
+            @Param("travelPlanId") Long travelPlanId
+    );
 }
