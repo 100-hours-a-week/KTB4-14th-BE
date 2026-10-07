@@ -61,7 +61,7 @@ public class TravelPlanService {
     @Transactional(readOnly = true)
     public TravelSummaryResponse getUpcomingTravel(Long userId) {
         return travelPlanRepository
-                .findTopByUserIdAndStatusAndConfirmedAtIsNotNullAndArrivalDatetimeGreaterThanEqualOrderByArrivalDatetimeAsc(
+                .findTopByUserIdAndStatusAndConfirmedAtIsNotNullAndDepartureDatetimeGreaterThanEqualOrderByArrivalDatetimeAsc(
                         userId,
                         TravelPlanStatus.COMPLETED,
                         LocalDate.now().atStartOfDay()
@@ -97,8 +97,22 @@ public class TravelPlanService {
         if (travelPlan.getStatus() != TravelPlanStatus.COMPLETED) {
             throw new BusinessException(ErrorCode.VALIDATION_FAILED);
         }
+        if (hasOverlappingConfirmedTravel(userId, travelPlanId, travelPlan)) {
+            throw new BusinessException(ErrorCode.OVERLAPPING_CONFIRMED_TRAVEL);
+        }
         travelPlan.confirm(LocalDateTime.now());
         return TravelSummaryResponse.from(travelPlan);
+    }
+
+    private boolean hasOverlappingConfirmedTravel(Long userId, Long travelPlanId, TravelPlan travelPlan) {
+        return travelPlanRepository
+                .existsByUserIdAndStatusAndConfirmedAtIsNotNullAndIdNotAndArrivalDatetimeLessThanEqualAndDepartureDatetimeGreaterThanEqual(
+                        userId,
+                        TravelPlanStatus.COMPLETED,
+                        travelPlanId,
+                        travelPlan.getDepartureDatetime(),
+                        travelPlan.getArrivalDatetime()
+                );
     }
 
     // 여행 생성하기 요청(1단계)
