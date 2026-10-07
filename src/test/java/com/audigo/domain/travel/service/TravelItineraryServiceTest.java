@@ -175,7 +175,7 @@ class TravelItineraryServiceTest {
         when(day.getDayNumber()).thenReturn(1);
         when(day.getTravelDate()).thenReturn(LocalDate.of(2026, 9, 29));
         when(dayRepository.findAllByTravelPlanIdOrderByDayNumberAsc(55L)).thenReturn(List.of(day));
-        when(itemRepository.findAllByItineraryDayIdOrderBySequenceAsc(1L)).thenReturn(List.of());
+        when(itemRepository.findAllWithPlaceByItineraryDayIdOrderBySequenceAsc(1L)).thenReturn(List.of());
 
         when(route.getId()).thenReturn(201L);
         when(route.getFromItineraryItem()).thenReturn(from);
