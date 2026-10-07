@@ -5,6 +5,7 @@
 data/test-ids.json
 data/create-request.json
 data/loadtest-user-ids.txt
+call-itinerary.sh
 
 # Load test results
 results/*
