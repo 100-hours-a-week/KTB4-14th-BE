@@ -189,7 +189,7 @@ class TravelItineraryServiceTest {
         when(route.getTotalFareAmount()).thenReturn(1500);
         when(route.getOrder()).thenReturn(1);
         when(route.getLegs()).thenReturn(List.of(busLeg, walkLeg));
-        when(routeRepository.findAllByTravelPlanId(55L)).thenReturn(List.of(route));
+        when(routeRepository.findAllWithLegsByTravelPlanId(55L)).thenReturn(List.of(route));
 
         when(busLeg.getSequence()).thenReturn(1);
         when(busLeg.getMode()).thenReturn("BUS");

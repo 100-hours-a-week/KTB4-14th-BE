@@ -65,7 +65,7 @@ public class TravelItineraryService {
             throw new BusinessException(ErrorCode.VALIDATION_FAILED);
         }
         List<ItineraryDay> days = dayRepository.findAllByTravelPlanIdOrderByDayNumberAsc(travelPlanId);
-        List<RouteSegment> routes = routeRepository.findAllByTravelPlanId(travelPlanId).stream()
+        List<RouteSegment> routes = routeRepository.findAllWithLegsByTravelPlanId(travelPlanId).stream()
                 .sorted(java.util.Comparator.comparingInt(RouteSegment::getOrder))
                 .toList();
         enrichMissingPlaceMetadata(plan, days);
