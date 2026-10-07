@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 .gradle/
 build/
 target/
@@ -14,29 +13,17 @@ out/
 
 logs/
 *.log
-=======
-# Compiled class file
-*.class
 
-# Log file
-*.log
+# OS/editor files
+.DS_Store
 
-# BlueJ files
-*.ctxt
-
-# Mobile Tools for Java (J2ME)
-.mtj.tmp/
-
-# Package Files #
-*.jar
-*.war
-*.nar
-*.ear
-*.zip
-*.tar.gz
-*.rar
-
-# virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
+# JVM crash logs
 hs_err_pid*
 replay_pid*
->>>>>>> 3980a455dfb6dc97da51de8340f902c814df6d5f
+
+# Local backend logs
+local-be.log
+local-be-before_*.log
+
+# Local load-test seed backup
+src/main/resources/data.regions.sql
