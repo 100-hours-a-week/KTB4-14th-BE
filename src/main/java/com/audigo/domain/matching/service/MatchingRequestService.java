@@ -46,6 +46,21 @@ public class MatchingRequestService {
         return MatchingRequestResponse.from(matchingRequestRepository.save(matchingRequest));
     }
 
+    @Transactional(readOnly = true)
+    public MatchingRequestResponse getMine(Long userId) {
+        return MatchingRequestResponse.from(findMine(userId));
+    }
+
+    @Transactional
+    public void cancelMine(Long userId) {
+        matchingRequestRepository.delete(findMine(userId));
+    }
+
+    private MatchingRequest findMine(Long userId) {
+        return matchingRequestRepository.findByRequester_Id(userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.MATCHING_REQUEST_NOT_FOUND));
+    }
+
     private void validate(CreateMatchingRequestRequest request) {
         if (request == null
                 || request.preferredCompanionGender() == null

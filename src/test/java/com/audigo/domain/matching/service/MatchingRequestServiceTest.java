@@ -3,6 +3,7 @@ package com.audigo.domain.matching.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.audigo.domain.matching.dto.CreateMatchingRequestRequest;
@@ -112,6 +113,50 @@ class MatchingRequestServiceTest {
                 );
     }
 
+    @Test
+    void gets_my_matching_request() {
+        MatchingRequest matchingRequest = matchingRequest();
+        when(matchingRequestRepository.findByRequester_Id(1L)).thenReturn(Optional.of(matchingRequest));
+
+        var response = matchingRequestService.getMine(1L);
+
+        assertThat(response.preferredCompanionGender()).isEqualTo(PreferredCompanionGender.FEMALE);
+        assertThat(response.themes()).containsExactly(TravelThemeType.NATURE, TravelThemeType.FOOD);
+        assertThat(response.pace()).isEqualTo(TravelPaceType.BALANCED);
+        assertThat(response.budgetMin()).isEqualTo(100_000);
+        assertThat(response.budgetMax()).isEqualTo(800_000);
+    }
+
+    @Test
+    void rejects_get_when_my_matching_request_not_found() {
+        when(matchingRequestRepository.findByRequester_Id(1L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> matchingRequestService.getMine(1L))
+                .isInstanceOfSatisfying(BusinessException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.MATCHING_REQUEST_NOT_FOUND)
+                );
+    }
+
+    @Test
+    void cancels_my_matching_request() {
+        MatchingRequest matchingRequest = matchingRequest();
+        when(matchingRequestRepository.findByRequester_Id(1L)).thenReturn(Optional.of(matchingRequest));
+
+        matchingRequestService.cancelMine(1L);
+
+        verify(matchingRequestRepository).delete(matchingRequest);
+    }
+
+    @Test
+    void rejects_cancel_when_my_matching_request_not_found() {
+        when(matchingRequestRepository.findByRequester_Id(1L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> matchingRequestService.cancelMine(1L))
+                .isInstanceOfSatisfying(BusinessException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.MATCHING_REQUEST_NOT_FOUND)
+                );
+    }
+
     private CreateMatchingRequestRequest validRequest() {
         return new CreateMatchingRequestRequest(
                 PreferredCompanionGender.FEMALE,
@@ -124,5 +169,16 @@ class MatchingRequestServiceTest {
 
     private User activeUser() {
         return User.create("윤혁", null);
+    }
+
+    private MatchingRequest matchingRequest() {
+        return MatchingRequest.create(
+                activeUser(),
+                PreferredCompanionGender.FEMALE,
+                TravelPaceType.BALANCED,
+                100_000,
+                800_000,
+                List.of(TravelThemeType.NATURE, TravelThemeType.FOOD)
+        );
     }
 }
