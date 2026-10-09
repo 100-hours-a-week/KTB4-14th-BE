@@ -17,6 +17,7 @@ public enum ErrorCode {
     USER_NOT_FOUND(HttpStatus.NOT_FOUND, "user_not_found"),
     REGION_NOT_FOUND(HttpStatus.NOT_FOUND, "region_not_found"),
     NOTIFICATION_NOT_FOUND(HttpStatus.NOT_FOUND, "notification_not_found"),
+    MATCHING_REQUEST_NOT_FOUND(HttpStatus.NOT_FOUND, "matching_request_not_found"),
     INVALID_NOTIFICATION_REQUEST(HttpStatus.BAD_REQUEST, "invalid_notification_request"),
     DUPLICATED_REQUIRED_PLACE(HttpStatus.CONFLICT, "duplicated_required_place"),
     TRAVEL_GENERATION_IN_PROGRESS(HttpStatus.CONFLICT, "travel_generation_in_progress"),
