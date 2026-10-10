@@ -1,5 +1,6 @@
 package com.audigo.domain.matching.dto;
 
+import com.audigo.domain.matching.entity.MatchingGender;
 import com.audigo.domain.travel.entity.TravelPaceType;
 import com.audigo.domain.travel.entity.TravelThemeType;
 import com.fasterxml.jackson.annotation.JsonAlias;
@@ -16,6 +17,9 @@ public record UpdateMatchingProfileRequest(
         @JsonAlias("isActive")
         @NotNull(message = "매칭 활성화 여부는 필수입니다.")
         Boolean active,
+
+        @NotNull(message = "성별은 필수입니다.")
+        MatchingGender gender,
 
         @NotNull(message = "여행 속도는 필수입니다.")
         TravelPaceType pace,

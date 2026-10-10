@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
 import com.audigo.domain.matching.dto.UpdateMatchingProfileRequest;
+import com.audigo.domain.matching.entity.MatchingGender;
 import com.audigo.domain.matching.entity.MatchingProfile;
 import com.audigo.domain.matching.repository.MatchingProfileRepository;
 import com.audigo.domain.travel.entity.TravelPaceType;
@@ -42,6 +43,7 @@ class MatchingProfileServiceTest {
 
         assertThat(response.exists()).isFalse();
         assertThat(response.active()).isFalse();
+        assertThat(response.gender()).isNull();
         assertThat(response.pace()).isNull();
         assertThat(response.themes()).isEmpty();
         assertThat(response.complete()).isFalse();
@@ -59,6 +61,7 @@ class MatchingProfileServiceTest {
                 1L,
                 new UpdateMatchingProfileRequest(
                         true,
+                        MatchingGender.FEMALE,
                         TravelPaceType.BALANCED,
                         List.of(TravelThemeType.NATURE, TravelThemeType.FOOD)
                 )
@@ -66,6 +69,7 @@ class MatchingProfileServiceTest {
 
         assertThat(response.exists()).isTrue();
         assertThat(response.active()).isTrue();
+        assertThat(response.gender()).isEqualTo(MatchingGender.FEMALE);
         assertThat(response.pace()).isEqualTo(TravelPaceType.BALANCED);
         assertThat(response.themes()).containsExactly(TravelThemeType.NATURE, TravelThemeType.FOOD);
         assertThat(response.complete()).isTrue();
@@ -77,6 +81,7 @@ class MatchingProfileServiceTest {
         MatchingProfile profile = MatchingProfile.create(
                 activeUser(),
                 true,
+                MatchingGender.MALE,
                 TravelPaceType.PACKED,
                 List.of(TravelThemeType.ACTIVITY)
         );
@@ -87,11 +92,12 @@ class MatchingProfileServiceTest {
 
         var response = matchingProfileService.updateMyProfile(
                 1L,
-                new UpdateMatchingProfileRequest(false, TravelPaceType.RELAXED, List.of())
+                new UpdateMatchingProfileRequest(false, MatchingGender.MALE, TravelPaceType.RELAXED, List.of())
         );
 
         assertThat(response.exists()).isTrue();
         assertThat(response.active()).isFalse();
+        assertThat(response.gender()).isEqualTo(MatchingGender.MALE);
         assertThat(response.pace()).isEqualTo(TravelPaceType.RELAXED);
         assertThat(response.themes()).isEmpty();
         assertThat(response.complete()).isFalse();
@@ -102,7 +108,7 @@ class MatchingProfileServiceTest {
     void rejects_active_profile_without_theme() {
         assertThatThrownBy(() -> matchingProfileService.updateMyProfile(
                 1L,
-                new UpdateMatchingProfileRequest(true, TravelPaceType.BALANCED, List.of())
+                new UpdateMatchingProfileRequest(true, MatchingGender.FEMALE, TravelPaceType.BALANCED, List.of())
         ))
                 .isInstanceOfSatisfying(BusinessException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_FAILED)
@@ -115,6 +121,7 @@ class MatchingProfileServiceTest {
                 1L,
                 new UpdateMatchingProfileRequest(
                         true,
+                        MatchingGender.FEMALE,
                         TravelPaceType.BALANCED,
                         List.of(TravelThemeType.NATURE, TravelThemeType.NATURE)
                 )
