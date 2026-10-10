@@ -14,9 +14,12 @@ import com.audigo.domain.matching.dto.MatchingCandidateResponse;
 import com.audigo.domain.matching.dto.MatchingCandidatesResponse;
 import com.audigo.domain.matching.entity.MatchConnection;
 import com.audigo.domain.matching.entity.MatchConnectionStatus;
+import com.audigo.domain.matching.entity.MatchingGender;
+import com.audigo.domain.matching.entity.MatchingProfile;
 import com.audigo.domain.matching.entity.MatchingRequest;
 import com.audigo.domain.matching.entity.PreferredCompanionGender;
 import com.audigo.domain.matching.repository.MatchConnectionRepository;
+import com.audigo.domain.matching.repository.MatchingProfileRepository;
 import com.audigo.domain.matching.repository.MatchingRequestRepository;
 import com.audigo.domain.travel.entity.TravelPaceType;
 import com.audigo.domain.travel.entity.TravelThemeType;
@@ -41,6 +44,9 @@ class MatchingCandidateServiceTest {
     private MatchingRequestRepository matchingRequestRepository;
 
     @Mock
+    private MatchingProfileRepository matchingProfileRepository;
+
+    @Mock
     private MatchingAiClient matchingAiClient;
 
     @Mock
@@ -55,6 +61,7 @@ class MatchingCandidateServiceTest {
     @Test
     void gets_candidates_from_ai_with_my_matching_request() {
         MatchingRequest matchingRequest = matchingRequest();
+        MatchingProfile candidateProfile = matchingProfile(22L);
         MatchingCandidatesResponse aiResponse = MatchingCandidatesResponse.of(List.of(
                 new MatchingCandidateResponse(
                         22L,
@@ -66,6 +73,7 @@ class MatchingCandidateServiceTest {
                 )
         ));
         when(matchingRequestRepository.findByRequester_Id(1L)).thenReturn(Optional.of(matchingRequest));
+        when(matchingProfileRepository.findActiveProfilesExceptUser(1L)).thenReturn(List.of(candidateProfile));
         when(matchingAiClient.getCandidates(any(MatchingCandidateAiRequest.class))).thenReturn(aiResponse);
 
         MatchingCandidatesResponse response = matchingCandidateService.getCandidates(1L);
@@ -78,6 +86,10 @@ class MatchingCandidateServiceTest {
         assertThat(requestCaptor.getValue().preferredCompanionGender()).isEqualTo(PreferredCompanionGender.FEMALE);
         assertThat(requestCaptor.getValue().themes()).containsExactly(TravelThemeType.NATURE, TravelThemeType.FOOD);
         assertThat(requestCaptor.getValue().pace()).isEqualTo(TravelPaceType.BALANCED);
+        assertThat(requestCaptor.getValue().candidates()).hasSize(1);
+        assertThat(requestCaptor.getValue().candidates().getFirst().userId()).isEqualTo(22L);
+        assertThat(requestCaptor.getValue().candidates().getFirst().gender()).isEqualTo(MatchingGender.MALE);
+        assertThat(requestCaptor.getValue().candidates().getFirst().themes()).containsExactly(TravelThemeType.CULTURE);
     }
 
     @Test
@@ -172,6 +184,16 @@ class MatchingCandidateServiceTest {
         );
         ReflectionTestUtils.setField(matchingRequest, "id", 10L);
         return matchingRequest;
+    }
+
+    private MatchingProfile matchingProfile(Long userId) {
+        return MatchingProfile.create(
+                activeUser(userId, "매칭후보"),
+                true,
+                MatchingGender.MALE,
+                TravelPaceType.RELAXED,
+                List.of(TravelThemeType.CULTURE)
+        );
     }
 
     private User activeUser(Long id, String nickname) {

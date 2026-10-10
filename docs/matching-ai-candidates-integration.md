@@ -37,7 +37,12 @@ AI 서버가 빈 후보 목록을 반환하면 `candidates: []`, `count: 0`으�
 
 ## BE -> AI 요청
 
-BE는 현재 사용자의 `matching_requests`와 `matching_requests_themes` 데이터를 읽어 AI 서버에 전달한다.
+BE는 현재 사용자의 `matching_requests`와 `matching_requests_themes` 데이터를 `request`에 담고,
+나를 제외한 활성 매칭 프로필 목록을 `candidates`에 담아 AI 서버에 전달한다.
+
+BE는 성별, 테마, 여행 속도, 예산 조건 기반의 후보 필터링을 수행하지 않는다.
+현재 단계에서는 매칭 대상으로 활성화되어 있고 프로필 값이 완성된 타 사용자를 AI 서버로 넘기며,
+최종 후보 3명 선별과 점수 계산은 AI 서버가 담당한다.
 
 기본 AI endpoint:
 
@@ -55,13 +60,29 @@ POST {AUDIGO_AI_BASE_URL}{AUDIGO_AI_MATCHING_CANDIDATES_PATH}
 
 ```json
 {
-  "matching_request_id": 10,
-  "user_id": 1,
-  "preferred_companion_gender": "FEMALE",
-  "theme": ["NATURE", "FOOD"],
-  "pace": "BALANCED",
-  "budget_min": 100000,
-  "budget_max": 800000
+  "request": {
+    "matching_request_id": 10,
+    "user_id": 1,
+    "preferred_companion_gender": "FEMALE",
+    "theme": ["NATURE", "FOOD"],
+    "pace": "BALANCED",
+    "budget_min": 100000,
+    "budget_max": 800000
+  },
+  "candidates": [
+    {
+      "user_id": 22,
+      "gender": "MALE",
+      "theme": ["CULTURE", "SNS"],
+      "pace": "RELAXED"
+    },
+    {
+      "user_id": 23,
+      "gender": "FEMALE",
+      "theme": ["NATURE", "FOOD"],
+      "pace": "BALANCED"
+    }
+  ]
 }
 ```
 

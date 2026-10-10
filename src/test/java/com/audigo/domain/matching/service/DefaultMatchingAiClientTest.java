@@ -11,6 +11,7 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import com.audigo.domain.matching.config.MatchingAiProperties;
 import com.audigo.domain.matching.dto.MatchingCandidateAiRequest;
 import com.audigo.domain.matching.dto.MatchingCandidatesResponse;
+import com.audigo.domain.matching.entity.MatchingGender;
 import com.audigo.domain.matching.entity.PreferredCompanionGender;
 import com.audigo.domain.travel.config.AiServerProperties;
 import com.audigo.domain.travel.entity.TravelPaceType;
@@ -31,7 +32,10 @@ class DefaultMatchingAiClientTest {
         server.expect(requestTo("http://ai.test/api/ai/v1/matches/candidates"))
                 .andExpect(method(HttpMethod.POST))
                 .andExpect(header("Authorization", "Bearer test-ai-token"))
+                .andExpect(content().string(containsString("\"request\"")))
+                .andExpect(content().string(containsString("\"candidates\"")))
                 .andExpect(content().string(containsString("\"preferred_companion_gender\":\"FEMALE\"")))
+                .andExpect(content().string(containsString("\"gender\":\"MALE\"")))
                 .andRespond(withSuccess("""
                         {
                           "candidates": [
@@ -78,13 +82,21 @@ class DefaultMatchingAiClientTest {
 
     private MatchingCandidateAiRequest request() {
         return new MatchingCandidateAiRequest(
-                10L,
-                1L,
-                PreferredCompanionGender.FEMALE,
-                List.of(TravelThemeType.NATURE, TravelThemeType.FOOD),
-                TravelPaceType.BALANCED,
-                100_000,
-                800_000
+                new MatchingCandidateAiRequest.RequestPayload(
+                        10L,
+                        1L,
+                        PreferredCompanionGender.FEMALE,
+                        List.of(TravelThemeType.NATURE, TravelThemeType.FOOD),
+                        TravelPaceType.BALANCED,
+                        100_000,
+                        800_000
+                ),
+                List.of(new MatchingCandidateAiRequest.CandidateProfilePayload(
+                        22L,
+                        MatchingGender.MALE,
+                        List.of(TravelThemeType.CULTURE),
+                        TravelPaceType.RELAXED
+                ))
         );
     }
 

@@ -122,6 +122,10 @@ public class MatchingProfile {
         return id;
     }
 
+    public Long getUserId() {
+        return user.id();
+    }
+
     public boolean isActive() {
         return active;
     }
