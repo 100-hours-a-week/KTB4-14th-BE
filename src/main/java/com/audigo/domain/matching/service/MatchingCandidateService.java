@@ -6,13 +6,16 @@ import com.audigo.domain.matching.dto.MatchingCandidateAiRequest;
 import com.audigo.domain.matching.dto.MatchingCandidatesResponse;
 import com.audigo.domain.matching.entity.MatchConnection;
 import com.audigo.domain.matching.entity.MatchConnectionStatus;
+import com.audigo.domain.matching.entity.MatchingProfile;
 import com.audigo.domain.matching.entity.MatchingRequest;
 import com.audigo.domain.matching.repository.MatchConnectionRepository;
+import com.audigo.domain.matching.repository.MatchingProfileRepository;
 import com.audigo.domain.matching.repository.MatchingRequestRepository;
 import com.audigo.domain.user.entity.User;
 import com.audigo.domain.user.repository.UserRepository;
 import com.audigo.global.error.BusinessException;
 import com.audigo.global.error.ErrorCode;
+import java.util.List;
 import java.util.Objects;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,17 +24,20 @@ import org.springframework.transaction.annotation.Transactional;
 public class MatchingCandidateService {
 
     private final MatchingRequestRepository matchingRequestRepository;
+    private final MatchingProfileRepository matchingProfileRepository;
     private final MatchingAiClient matchingAiClient;
     private final MatchConnectionRepository matchConnectionRepository;
     private final UserRepository userRepository;
 
     public MatchingCandidateService(
             MatchingRequestRepository matchingRequestRepository,
+            MatchingProfileRepository matchingProfileRepository,
             MatchingAiClient matchingAiClient,
             MatchConnectionRepository matchConnectionRepository,
             UserRepository userRepository
     ) {
         this.matchingRequestRepository = matchingRequestRepository;
+        this.matchingProfileRepository = matchingProfileRepository;
         this.matchingAiClient = matchingAiClient;
         this.matchConnectionRepository = matchConnectionRepository;
         this.userRepository = userRepository;
@@ -41,7 +47,11 @@ public class MatchingCandidateService {
     public MatchingCandidatesResponse getCandidates(Long userId) {
         MatchingRequest matchingRequest = matchingRequestRepository.findByRequester_Id(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.MATCHING_REQUEST_NOT_FOUND));
-        return matchingAiClient.getCandidates(MatchingCandidateAiRequest.from(matchingRequest));
+        List<MatchingProfile> candidateProfiles = matchingProfileRepository.findActiveProfilesExceptUser(userId)
+                .stream()
+                .filter(MatchingProfile::isComplete)
+                .toList();
+        return matchingAiClient.getCandidates(MatchingCandidateAiRequest.from(matchingRequest, candidateProfiles));
     }
 
     @Transactional
