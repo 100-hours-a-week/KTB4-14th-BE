@@ -50,6 +50,10 @@ public class MatchingProfile {
     private boolean active;
 
     @Enumerated(EnumType.STRING)
+    @Column(name = "gender", length = 20)
+    private MatchingGender gender;
+
+    @Enumerated(EnumType.STRING)
     @Column(name = "pace", nullable = false, length = 20)
     private TravelPaceType pace;
 
@@ -68,24 +72,27 @@ public class MatchingProfile {
     private MatchingProfile(
             User user,
             boolean active,
+            MatchingGender gender,
             TravelPaceType pace,
             List<TravelThemeType> themes
     ) {
         this.user = Objects.requireNonNull(user, "사용자는 필수입니다.");
-        update(active, pace, themes);
+        update(active, gender, pace, themes);
     }
 
     public static MatchingProfile create(
             User user,
             boolean active,
+            MatchingGender gender,
             TravelPaceType pace,
             List<TravelThemeType> themes
     ) {
-        return new MatchingProfile(user, active, pace, themes);
+        return new MatchingProfile(user, active, gender, pace, themes);
     }
 
-    public void update(boolean active, TravelPaceType pace, List<TravelThemeType> themes) {
+    public void update(boolean active, MatchingGender gender, TravelPaceType pace, List<TravelThemeType> themes) {
         this.active = active;
+        this.gender = Objects.requireNonNull(gender, "성별은 필수입니다.");
         this.pace = Objects.requireNonNull(pace, "여행 속도는 필수입니다.");
         replaceThemes(themes);
     }
@@ -123,12 +130,16 @@ public class MatchingProfile {
         return pace;
     }
 
+    public MatchingGender getGender() {
+        return gender;
+    }
+
     public List<MatchingProfileTheme> getThemes() {
         return Collections.unmodifiableList(themes);
     }
 
     public boolean isComplete() {
-        return pace != null && !themes.isEmpty();
+        return gender != null && pace != null && !themes.isEmpty();
     }
 
     public boolean canMatch() {

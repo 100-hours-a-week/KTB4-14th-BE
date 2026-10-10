@@ -40,13 +40,23 @@ public class MatchingProfileService {
         validate(request);
         User user = findActiveUser(userId);
         MatchingProfile profile = matchingProfileRepository.findByUser_Id(userId)
-                .orElseGet(() -> MatchingProfile.create(user, request.active(), request.pace(), request.themes()));
-        profile.update(request.active(), request.pace(), request.themes());
+                .orElseGet(() -> MatchingProfile.create(
+                        user,
+                        request.active(),
+                        request.gender(),
+                        request.pace(),
+                        request.themes()
+                ));
+        profile.update(request.active(), request.gender(), request.pace(), request.themes());
         return MatchingProfileResponse.from(matchingProfileRepository.save(profile));
     }
 
     private void validate(UpdateMatchingProfileRequest request) {
-        if (request == null || request.active() == null || request.pace() == null || request.themes() == null) {
+        if (request == null
+                || request.active() == null
+                || request.gender() == null
+                || request.pace() == null
+                || request.themes() == null) {
             throw new BusinessException(ErrorCode.VALIDATION_FAILED);
         }
         List<TravelThemeType> themes = request.themes();
