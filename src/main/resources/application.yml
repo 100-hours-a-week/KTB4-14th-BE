@@ -79,6 +79,6 @@ audigo:
       candidate-limit: ${AUDIGO_AI_MATCHING_CANDIDATE_LIMIT:3}
 
 sentry:
-  dsn: ${SENTRY_DSN}
+  dsn: ${SENTRY_DSN:}
   environment: ${SPRING_PROFILES_ACTIVE:local}
   traces-sample-rate: 0.1
