@@ -13,3 +13,8 @@ results/*
 
 # Project-local xk6 binary with the SSE extension
 .bin/
+
+# Local Prometheus/Grafana runtime state, generated credentials and file-SD targets
+monitoring/runtime/
+data/test-ids-001-150.json
+data/test-ids-151-300.json

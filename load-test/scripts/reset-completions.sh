@@ -4,7 +4,7 @@ set -Eeuo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-if [[ -f .env ]]; then
+if [[ "${LOAD_TEST_SKIP_DOTENV:-false}" != true && -f .env ]]; then
   set -a
   # .env is local, gitignored operator configuration.
   # shellcheck disable=SC1091

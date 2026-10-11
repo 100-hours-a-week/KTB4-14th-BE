@@ -1,0 +1,12 @@
+apiVersion: 1
+
+providers:
+  - name: Audigo Load Test Monitoring
+    orgId: 1
+    folder: Audigo Load Test
+    type: file
+    disableDeletion: true
+    updateIntervalSeconds: 10
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana/dashboards

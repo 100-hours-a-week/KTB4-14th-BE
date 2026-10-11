@@ -16,7 +16,7 @@ case "$SCRIPT" in
 esac
 
 CALLER_TEST_RUN_ID="${TEST_RUN_ID:-}"
-if [[ -f .env ]]; then
+if [[ "${LOAD_TEST_SKIP_DOTENV:-false}" != true && -f .env ]]; then
   set -a
   # shellcheck disable=SC1091
   source .env
@@ -49,16 +49,29 @@ if [[ -e "$SUMMARY_FILE" ]]; then
   exit 1
 fi
 
+# Optional monitoring phase journal. No token or request body is stored.
+mark_monitoring_phase() {
+  if [[ -n "${MONITORING_PHASE_FILE:-}" ]]; then
+    node - "$MONITORING_PHASE_FILE" "$1" "${2:-}" <<'NODE'
+const fs = require('fs');
+fs.appendFileSync(process.argv[2], JSON.stringify({ phase: process.argv[3], timestamp: new Date().toISOString(), exitCode: process.argv[4] === '' ? null : Number(process.argv[4]) }) + '\n', { mode: 0o600 });
+NODE
+  fi
+}
+
 INTERRUPTED_STATUS=0
 # 터미널 Ctrl-C로 k6/tee가 종료돼도 래퍼는 복구 단계까지 계속한다.
 trap 'INTERRUPTED_STATUS=130' INT
 trap 'INTERRUPTED_STATUS=143' TERM
 trap 'INTERRUPTED_STATUS=129' HUP
+mark_monitoring_phase performance_start
 set +e
 ./scripts/test/run-k6.sh "$SCRIPT" "$@" 2>&1 | tee "$RESULT_DIR/performance.log"
 K6_STATUS=${PIPESTATUS[0]}
 if (( INTERRUPTED_STATUS != 0 )); then K6_STATUS=$INTERRUPTED_STATUS; fi
 set -e
+mark_monitoring_phase performance_end "$K6_STATUS"
+mark_monitoring_phase reset_start
 
 RESET_LOG="$RESULT_DIR/completion-reset.log"
 if [[ "$SCRIPT" == scenarios/api/completion-ramping-arrival.js && -f "$RESULT_DIR/completion-items.json" ]]; then
@@ -103,6 +116,8 @@ else
   RESET_STATUS=${PIPESTATUS[0]}
   set -e
 fi
+
+mark_monitoring_phase reset_end "$RESET_STATUS"
 
 if (( RESET_STATUS != 0 )); then
   echo "Completion reset failed; do not start another LT-02 run. log=$RESET_LOG" >&2

@@ -23,7 +23,7 @@ if [[ ! -f "$SCRIPT" ]]; then
   exit 1
 fi
 
-if [[ -f .env ]]; then
+if [[ "${LOAD_TEST_SKIP_DOTENV:-false}" != true && -f .env ]]; then
   set -a
   # .env is a local operator-controlled file and is gitignored.
   # shellcheck disable=SC1091

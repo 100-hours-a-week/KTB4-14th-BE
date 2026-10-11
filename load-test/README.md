@@ -10,6 +10,92 @@ Spring Boot 소스는 변경하지 않고 `load-test/`만 사용해 **Staging Ba
 `results/YYYY-MM-DD-HH-mm/`에 저장되고, 하위 시나리오는 `itinerary-ramping-arrival-summary.json`처럼
 폴더명을 포함한 이름으로 구분된다.
 
+### 로컬 모니터링과 함께 실행
+
+> **JWT 전송 보안:** 원격 HTTP 지표 수집은 기본 거부한다. HTTPS 또는 Backend SSH 터널을
+> 사용하고, 후자는 `MONITORING_BACKEND_URL=http://127.0.0.1:19106`으로 지정한다.
+> `BASE_URL`은 기존 k6 대상 주소로 유지한다. 격리된 Staging JWT의 평문 전송 위험을 이해하고
+> 명시적으로 허용할 때만 `MONITORING_ALLOW_INSECURE_HTTP=true`를 사용한다. 자동으로 켜지지 않는다.
+
+Staging Backend Actuator와 MySQL Exporter를 로컬 Prometheus·Grafana로 수집한다. Spring Boot·MySQL
+애플리케이션 코드는 변경하지 않는다. MySQL Exporter는 DB EC2의 loopback에만 바인딩하고, Mac의 SSH
+터널을 통해서만 접근한다.
+
+#### 최초 1회: 사전 조건
+
+| 항목 | 조건 |
+| --- | --- |
+| Staging 확인 | `.env`에 `BASE_URL`, `CONFIRM_STAGING=true`가 있고 운영 호스트가 아니어야 한다. |
+| Backend 인증 | `.env`의 `ACCESS_TOKEN` 또는 `data/test-ids.json`에 현재 Staging JWT가 있어야 한다. 토큰·JWT Secret은 Git에 저장하지 않는다. |
+| MySQL 수집 | DB EC2의 `mysqld_exporter`가 `127.0.0.1:9104`에서 `mysql_up 1`을 반환해야 한다. |
+| SSH 터널 | Mac에서 `127.0.0.1:19104`가 DB EC2 loopback `9104`으로 전달되어야 한다. |
+| 로컬 Docker | Mac의 Docker Desktop이 실행 중이어야 한다. |
+
+Mac의 별도 터미널에서 SSH 터널을 열고 유지한다. PEM 경로와 DB EC2 주소는 실제 값으로 바꾼다.
+
+```bash
+ssh -i "/actual/path/audigo-ecs-on-ec2.pem" \
+  -N \
+  -L 127.0.0.1:19104:127.0.0.1:9104 \
+  -o ExitOnForwardFailure=yes \
+  -o ServerAliveInterval=30 \
+  ec2-user@DB_EC2_PUBLIC_IP
+```
+
+다른 Mac 터미널에서 다음 결과가 `mysql_up 1`인지 확인한다.
+
+```bash
+curl -fsS --max-time 10 http://127.0.0.1:19104/metrics \
+  | grep '^mysql_up '
+```
+
+#### 모니터링 준비·실행·조회
+
+모든 명령은 `load-test/`에서 실행한다. `prepare`는 Backend 지표 인증과 MySQL tunnel scrape를 확인한 뒤
+로컬 수집 대상을 대기 상태로 둔다. 인증 오류(401/403) 또는 네트워크 오류면 k6 부하를 시작하지 않는다.
+
+```bash
+# 로컬 Prometheus·Grafana와 Backend 지표 bridge를 준비하고 연결을 검증한다.
+CONFIRM_STAGING=true \
+./scripts/monitoring/monitor.sh prepare
+
+# 기존 k6 환경변수를 그대로 전달해 지표 수집과 부하를 함께 실행한다.
+CONFIRM_STAGING=true \
+ITINERARY_API_RAMP_PEAK_RPS=50 \
+./scripts/monitoring/monitor.sh run \
+  scenarios/api/itinerary-ramping-arrival.js
+
+# 완료 처리 시나리오만: 기존 완료 복구를 실행 뒤에 수행한다.
+CONFIRM_STAGING=true \
+ALLOW_WRITE_TESTS=true \
+CONFIRM_COMPLETION_RESET=true \
+./scripts/monitoring/monitor.sh run --reset \
+  scenarios/api/completion-ramping-arrival.js
+
+# 로컬 Grafana를 준비하고 접속 URL을 출력한다. Staging 연결·JWT가 필요하지 않다.
+./scripts/monitoring/monitor.sh view
+
+# 로컬 서비스와 bridge 상태를 확인한다.
+./scripts/monitoring/monitor.sh status
+
+# bridge와 로컬 Compose 서비스를 중지한다. 결과·Docker volume·SSH 터널·EC2는 유지한다.
+./scripts/monitoring/monitor.sh stop
+```
+
+| 환경변수 | 기본값 | 설명 |
+| --- | ---: | --- |
+| `MONITORING_INTERVAL_SECONDS` | `5` | Backend Actuator를 읽는 bridge 수집 간격(초)다. Prometheus scrape 간격은 고정 `5`초다. |
+| `MONITORING_PRE_SECONDS` | `30` | k6 시작 전 지표 수집 시간(초)이다. `0` 이상이다. |
+| `MONITORING_POST_SECONDS` | `30` | k6 종료 후 지표 수집 시간(초)이다. `0` 이상이다. |
+| `MONITORING_REQUEST_TIMEOUT_MS` | `3000` | Backend Actuator 개별 요청 timeout(ms)이다. |
+| `MONITORING_BRIDGE_PORT` | `19105` | Mac loopback Backend Actuator → Prometheus bridge 포트다. |
+| `MONITORING_READY_TIMEOUT_SECONDS` | `60` | Backend bridge·Prometheus scrape 준비 대기 상한(초)이다. |
+
+`run`은 k6의 기존 안전 플래그·RPS·VU·시간 환경변수를 변경하지 않는다. `--reset`은 완료 처리 관련
+시나리오에서만 사용하며, k6 성능 결과와 reset 요청 결과를 분리해 기록한다. 실행 중 수집이 실패하면 오류·누락을
+기록하지만 요청률을 자동 완화하지 않는다. 수집 결과와 Grafana 제한 사항은
+[`monitoring/README.md`](monitoring/README.md)를 참고한다.
+
 ### 단일 API Ramp 부하테스트 — 신규 9개
 
 기존 사용자 흐름 테스트는 유지한다. 아래 시나리오는 `ramping-arrival-rate`로 **측정 iteration당 대상 API만
