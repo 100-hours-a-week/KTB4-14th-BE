@@ -9,8 +9,8 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import com.audigo.domain.matching.config.MatchingAiProperties;
+import com.audigo.domain.matching.dto.MatchingAiCandidatesResponse;
 import com.audigo.domain.matching.dto.MatchingCandidateAiRequest;
-import com.audigo.domain.matching.dto.MatchingCandidatesResponse;
 import com.audigo.domain.matching.entity.MatchingGender;
 import com.audigo.domain.matching.entity.PreferredCompanionGender;
 import com.audigo.domain.travel.config.AiServerProperties;
@@ -35,16 +35,13 @@ class DefaultMatchingAiClientTest {
                 .andExpect(content().string(containsString("\"request\"")))
                 .andExpect(content().string(containsString("\"candidates\"")))
                 .andExpect(content().string(containsString("\"preferred_companion_gender\":\"FEMALE\"")))
+                .andExpect(content().string(containsString("\"nickname\":\"매칭후보\"")))
                 .andExpect(content().string(containsString("\"gender\":\"MALE\"")))
                 .andRespond(withSuccess("""
                         {
                           "candidates": [
                             {
                               "user_id": 22,
-                              "nickname": "매칭후보",
-                              "profile_image_url": "https://example.com/profile.png",
-                              "theme": ["NATURE", "FOOD"],
-                              "pace": "BALANCED",
                               "match_rate": 89
                             }
                           ],
@@ -57,11 +54,11 @@ class DefaultMatchingAiClientTest {
                 new MatchingAiProperties("/api/ai/v1/matches/candidates", false, 3)
         );
 
-        MatchingCandidatesResponse response = client.getCandidates(request());
+        MatchingAiCandidatesResponse response = client.getCandidates(request());
 
         assertThat(response.count()).isEqualTo(1);
         assertThat(response.candidates().getFirst().userId()).isEqualTo(22L);
-        assertThat(response.candidates().getFirst().themes()).containsExactly(TravelThemeType.NATURE, TravelThemeType.FOOD);
+        assertThat(response.candidates().getFirst().matchRate()).isEqualTo(89);
         server.verify();
     }
 
@@ -73,11 +70,11 @@ class DefaultMatchingAiClientTest {
                 new MatchingAiProperties("/api/ai/v1/matches/candidates", true, 2)
         );
 
-        MatchingCandidatesResponse response = client.getCandidates(request());
+        MatchingAiCandidatesResponse response = client.getCandidates(request());
 
-        assertThat(response.count()).isEqualTo(2);
-        assertThat(response.candidates()).extracting("nickname")
-                .containsExactly("매칭 후보 1", "매칭 후보 2");
+        assertThat(response.count()).isEqualTo(1);
+        assertThat(response.candidates().getFirst().userId()).isEqualTo(22L);
+        assertThat(response.candidates().getFirst().matchRate()).isEqualTo(92);
     }
 
     private MatchingCandidateAiRequest request() {
@@ -93,6 +90,7 @@ class DefaultMatchingAiClientTest {
                 ),
                 List.of(new MatchingCandidateAiRequest.CandidateProfilePayload(
                         22L,
+                        "매칭후보",
                         MatchingGender.MALE,
                         List.of(TravelThemeType.CULTURE),
                         TravelPaceType.RELAXED

@@ -43,6 +43,7 @@ BE는 현재 사용자의 `matching_requests`와 `matching_requests_themes` 데�
 BE는 성별, 테마, 여행 속도, 예산 조건 기반의 후보 필터링을 수행하지 않는다.
 현재 단계에서는 매칭 대상으로 활성화되어 있고 프로필 값이 완성된 타 사용자를 AI 서버로 넘기며,
 최종 후보 3명 선별과 점수 계산은 AI 서버가 담당한다.
+동점 정렬에 사용할 수 있도록 후보 데이터에는 닉네임을 포함하지만, 프로필 이미지는 AI 서버로 전달하지 않는다.
 
 기본 AI endpoint:
 
@@ -72,12 +73,14 @@ POST {AUDIGO_AI_BASE_URL}{AUDIGO_AI_MATCHING_CANDIDATES_PATH}
   "candidates": [
     {
       "user_id": 22,
+      "nickname": "매칭후보A",
       "gender": "MALE",
       "theme": ["CULTURE", "SNS"],
       "pace": "RELAXED"
     },
     {
       "user_id": 23,
+      "nickname": "매칭후보B",
       "gender": "FEMALE",
       "theme": ["NATURE", "FOOD"],
       "pace": "BALANCED"
@@ -86,17 +89,14 @@ POST {AUDIGO_AI_BASE_URL}{AUDIGO_AI_MATCHING_CANDIDATES_PATH}
 }
 ```
 
-AI 응답은 FE 응답의 `data`와 같은 구조를 기대한다.
+AI 응답은 최종 후보의 사용자 ID와 매칭 점수만 기대한다.
+BE는 AI가 반환한 `user_id`를 기준으로 사용자 닉네임, 프로필 이미지, 매칭 프로필을 조회해 FE 응답을 조립한다.
 
 ```json
 {
   "candidates": [
     {
       "user_id": 22,
-      "nickname": "매칭후보",
-      "profile_image_url": "https://example.com/profile.png",
-      "theme": ["NATURE", "FOOD"],
-      "pace": "BALANCED",
       "match_rate": 89
     }
   ],

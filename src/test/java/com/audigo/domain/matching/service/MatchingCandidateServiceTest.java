@@ -9,8 +9,9 @@ import static org.mockito.Mockito.when;
 
 import com.audigo.domain.matching.dto.CreateMatchConnectionRequest;
 import com.audigo.domain.matching.dto.MatchConnectionResponse;
+import com.audigo.domain.matching.dto.MatchingAiCandidateResponse;
+import com.audigo.domain.matching.dto.MatchingAiCandidatesResponse;
 import com.audigo.domain.matching.dto.MatchingCandidateAiRequest;
-import com.audigo.domain.matching.dto.MatchingCandidateResponse;
 import com.audigo.domain.matching.dto.MatchingCandidatesResponse;
 import com.audigo.domain.matching.entity.MatchConnection;
 import com.audigo.domain.matching.entity.MatchConnectionStatus;
@@ -62,13 +63,9 @@ class MatchingCandidateServiceTest {
     void gets_candidates_from_ai_with_my_matching_request() {
         MatchingRequest matchingRequest = matchingRequest();
         MatchingProfile candidateProfile = matchingProfile(22L);
-        MatchingCandidatesResponse aiResponse = MatchingCandidatesResponse.of(List.of(
-                new MatchingCandidateResponse(
+        MatchingAiCandidatesResponse aiResponse = MatchingAiCandidatesResponse.of(List.of(
+                new MatchingAiCandidateResponse(
                         22L,
-                        "매칭후보",
-                        "https://example.com/profile.png",
-                        List.of(TravelThemeType.NATURE),
-                        TravelPaceType.BALANCED,
                         89
                 )
         ));
@@ -80,6 +77,10 @@ class MatchingCandidateServiceTest {
 
         assertThat(response.count()).isEqualTo(1);
         assertThat(response.candidates().getFirst().nickname()).isEqualTo("매칭후보");
+        assertThat(response.candidates().getFirst().profileImageUrl()).isNull();
+        assertThat(response.candidates().getFirst().themes()).containsExactly(TravelThemeType.CULTURE);
+        assertThat(response.candidates().getFirst().pace()).isEqualTo(TravelPaceType.RELAXED);
+        assertThat(response.candidates().getFirst().matchRate()).isEqualTo(89);
         ArgumentCaptor<MatchingCandidateAiRequest> requestCaptor =
                 ArgumentCaptor.forClass(MatchingCandidateAiRequest.class);
         verify(matchingAiClient).getCandidates(requestCaptor.capture());
@@ -88,6 +89,7 @@ class MatchingCandidateServiceTest {
         assertThat(requestCaptor.getValue().pace()).isEqualTo(TravelPaceType.BALANCED);
         assertThat(requestCaptor.getValue().candidates()).hasSize(1);
         assertThat(requestCaptor.getValue().candidates().getFirst().userId()).isEqualTo(22L);
+        assertThat(requestCaptor.getValue().candidates().getFirst().nickname()).isEqualTo("매칭후보");
         assertThat(requestCaptor.getValue().candidates().getFirst().gender()).isEqualTo(MatchingGender.MALE);
         assertThat(requestCaptor.getValue().candidates().getFirst().themes()).containsExactly(TravelThemeType.CULTURE);
     }

@@ -1,17 +1,15 @@
 package com.audigo.domain.matching.service;
 
 import com.audigo.domain.matching.config.MatchingAiProperties;
+import com.audigo.domain.matching.dto.MatchingAiCandidateResponse;
+import com.audigo.domain.matching.dto.MatchingAiCandidatesResponse;
 import com.audigo.domain.matching.dto.MatchingCandidateAiRequest;
-import com.audigo.domain.matching.dto.MatchingCandidateResponse;
-import com.audigo.domain.matching.dto.MatchingCandidatesResponse;
 import com.audigo.domain.travel.config.AiServerProperties;
-import com.audigo.domain.travel.entity.TravelPaceType;
-import com.audigo.domain.travel.entity.TravelThemeType;
 import com.audigo.global.error.BusinessException;
 import com.audigo.global.error.ErrorCode;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.IntStream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -56,7 +54,7 @@ public class DefaultMatchingAiClient implements MatchingAiClient {
     }
 
     @Override
-    public MatchingCandidatesResponse getCandidates(MatchingCandidateAiRequest request) {
+    public MatchingAiCandidatesResponse getCandidates(MatchingCandidateAiRequest request) {
         if (matchingAiProperties.mockEnabled()) {
             return mockCandidates(request);
         }
@@ -73,7 +71,7 @@ public class DefaultMatchingAiClient implements MatchingAiClient {
                 !aiProperties.apiToken().isBlank()
         );
         try {
-            MatchingCandidatesResponse response = restClient.post()
+            MatchingAiCandidatesResponse response = restClient.post()
                     .uri(url)
                     .headers(headers -> {
                         if (!aiProperties.apiToken().isBlank()) {
@@ -84,9 +82,9 @@ public class DefaultMatchingAiClient implements MatchingAiClient {
                     .accept(MediaType.APPLICATION_JSON)
                     .body(request)
                     .retrieve()
-                    .body(MatchingCandidatesResponse.class);
-            MatchingCandidatesResponse normalized = response == null
-                    ? MatchingCandidatesResponse.empty()
+                    .body(MatchingAiCandidatesResponse.class);
+            MatchingAiCandidatesResponse normalized = response == null
+                    ? MatchingAiCandidatesResponse.empty()
                     : response;
             log.info(
                     "matching_ai_candidates_request_complete matching_request_id={} count={}",
@@ -112,31 +110,21 @@ public class DefaultMatchingAiClient implements MatchingAiClient {
         }
     }
 
-    private MatchingCandidatesResponse mockCandidates(MatchingCandidateAiRequest request) {
-        List<TravelThemeType> themes = request.themes().isEmpty()
-                ? List.of(TravelThemeType.NATURE)
-                : request.themes();
-        TravelPaceType pace = request.pace() == null ? TravelPaceType.BALANCED : request.pace();
-        long baseUserId = request.userId() == null ? 10_000L : request.userId() + 100L;
+    private MatchingAiCandidatesResponse mockCandidates(MatchingCandidateAiRequest request) {
         int limit = matchingAiProperties.candidateLimit();
-
-        List<MatchingCandidateResponse> candidates = new ArrayList<>();
-        for (int index = 0; index < limit; index++) {
-            candidates.add(new MatchingCandidateResponse(
-                    baseUserId + index + 1,
-                    "매칭 후보 " + (index + 1),
-                    null,
-                    themes,
-                    pace,
-                    Math.max(60, 92 - index * 7)
-            ));
-        }
+        List<MatchingCandidateAiRequest.CandidateProfilePayload> source = request.candidates();
+        List<MatchingAiCandidateResponse> candidates = IntStream.range(0, Math.min(limit, source.size()))
+                .mapToObj(index -> new MatchingAiCandidateResponse(
+                        source.get(index).userId(),
+                        Math.max(60, 92 - index * 7)
+                ))
+                .toList();
         log.info(
                 "matching_ai_candidates_mocked matching_request_id={} count={}",
                 request.matchingRequestId(),
                 candidates.size()
         );
-        return MatchingCandidatesResponse.of(candidates);
+        return MatchingAiCandidatesResponse.of(candidates);
     }
 
     private String joinUrl(String baseUrl, String path) {
