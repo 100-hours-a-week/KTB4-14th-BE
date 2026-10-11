@@ -175,7 +175,7 @@ class TravelItineraryServiceTest {
         when(day.getDayNumber()).thenReturn(1);
         when(day.getTravelDate()).thenReturn(LocalDate.of(2026, 9, 29));
         when(dayRepository.findAllByTravelPlanIdOrderByDayNumberAsc(55L)).thenReturn(List.of(day));
-        when(itemRepository.findAllByItineraryDayIdOrderBySequenceAsc(1L)).thenReturn(List.of());
+        when(itemRepository.findAllWithPlaceByTravelPlanIdOrderByDayNumberAndSequence(55L)).thenReturn(List.of());
 
         when(route.getId()).thenReturn(201L);
         when(route.getFromItineraryItem()).thenReturn(from);
@@ -189,7 +189,7 @@ class TravelItineraryServiceTest {
         when(route.getTotalFareAmount()).thenReturn(1500);
         when(route.getOrder()).thenReturn(1);
         when(route.getLegs()).thenReturn(List.of(busLeg, walkLeg));
-        when(routeRepository.findAllByTravelPlanId(55L)).thenReturn(List.of(route));
+        when(routeRepository.findAllWithLegsByTravelPlanId(55L)).thenReturn(List.of(route));
 
         when(busLeg.getSequence()).thenReturn(1);
         when(busLeg.getMode()).thenReturn("BUS");
