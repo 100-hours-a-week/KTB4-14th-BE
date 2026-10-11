@@ -126,6 +126,14 @@ public class MatchingProfile {
         return user.id();
     }
 
+    public String getNickname() {
+        return user.nickname();
+    }
+
+    public String getProfileImageUrl() {
+        return user.profileImageUrl();
+    }
+
     public boolean isActive() {
         return active;
     }

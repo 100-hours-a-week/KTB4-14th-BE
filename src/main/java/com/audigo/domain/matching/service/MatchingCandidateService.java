@@ -2,11 +2,15 @@ package com.audigo.domain.matching.service;
 
 import com.audigo.domain.matching.dto.CreateMatchConnectionRequest;
 import com.audigo.domain.matching.dto.MatchConnectionResponse;
+import com.audigo.domain.matching.dto.MatchingAiCandidateResponse;
+import com.audigo.domain.matching.dto.MatchingAiCandidatesResponse;
 import com.audigo.domain.matching.dto.MatchingCandidateAiRequest;
+import com.audigo.domain.matching.dto.MatchingCandidateResponse;
 import com.audigo.domain.matching.dto.MatchingCandidatesResponse;
 import com.audigo.domain.matching.entity.MatchConnection;
 import com.audigo.domain.matching.entity.MatchConnectionStatus;
 import com.audigo.domain.matching.entity.MatchingProfile;
+import com.audigo.domain.matching.entity.MatchingProfileTheme;
 import com.audigo.domain.matching.entity.MatchingRequest;
 import com.audigo.domain.matching.repository.MatchConnectionRepository;
 import com.audigo.domain.matching.repository.MatchingProfileRepository;
@@ -16,7 +20,10 @@ import com.audigo.domain.user.repository.UserRepository;
 import com.audigo.global.error.BusinessException;
 import com.audigo.global.error.ErrorCode;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -51,7 +58,45 @@ public class MatchingCandidateService {
                 .stream()
                 .filter(MatchingProfile::isComplete)
                 .toList();
-        return matchingAiClient.getCandidates(MatchingCandidateAiRequest.from(matchingRequest, candidateProfiles));
+        MatchingAiCandidatesResponse aiResponse = matchingAiClient.getCandidates(
+                MatchingCandidateAiRequest.from(matchingRequest, candidateProfiles)
+        );
+        return toCandidateResponse(aiResponse, candidateProfiles);
+    }
+
+    private MatchingCandidatesResponse toCandidateResponse(
+            MatchingAiCandidatesResponse aiResponse,
+            List<MatchingProfile> candidateProfiles
+    ) {
+        Map<Long, MatchingProfile> profileByUserId = candidateProfiles.stream()
+                .collect(Collectors.toMap(
+                        MatchingProfile::getUserId,
+                        Function.identity(),
+                        (left, right) -> left
+                ));
+        List<MatchingCandidateResponse> candidates = aiResponse.candidates()
+                .stream()
+                .map(aiCandidate -> toCandidateResponse(aiCandidate, profileByUserId.get(aiCandidate.userId())))
+                .filter(Objects::nonNull)
+                .toList();
+        return MatchingCandidatesResponse.of(candidates);
+    }
+
+    private MatchingCandidateResponse toCandidateResponse(
+            MatchingAiCandidateResponse aiCandidate,
+            MatchingProfile profile
+    ) {
+        if (profile == null) {
+            return null;
+        }
+        return new MatchingCandidateResponse(
+                profile.getUserId(),
+                profile.getNickname(),
+                profile.getProfileImageUrl(),
+                profile.getThemes().stream().map(MatchingProfileTheme::getTheme).toList(),
+                profile.getPace(),
+                aiCandidate.matchRate()
+        );
     }
 
     @Transactional

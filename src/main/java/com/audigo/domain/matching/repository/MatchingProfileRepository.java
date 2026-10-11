@@ -14,6 +14,7 @@ public interface MatchingProfileRepository extends JpaRepository<MatchingProfile
     @Query("""
             select distinct profile
             from MatchingProfile profile
+            join fetch profile.user
             left join fetch profile.themes
             where profile.active = true
               and profile.user.id <> :userId

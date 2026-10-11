@@ -78,6 +78,7 @@ public record MatchingCandidateAiRequest(
 
     public record CandidateProfilePayload(
             @JsonProperty("user_id") Long userId,
+            String nickname,
             MatchingGender gender,
             @JsonProperty("theme") List<TravelThemeType> themes,
             TravelPaceType pace
@@ -90,6 +91,7 @@ public record MatchingCandidateAiRequest(
         static CandidateProfilePayload from(MatchingProfile profile) {
             return new CandidateProfilePayload(
                     profile.getUserId(),
+                    profile.getNickname(),
                     profile.getGender(),
                     profile.getThemes().stream().map(MatchingProfileTheme::getTheme).toList(),
                     profile.getPace()
