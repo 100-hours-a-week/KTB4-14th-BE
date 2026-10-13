@@ -15,7 +15,7 @@ import jakarta.persistence.UniqueConstraint;
 import java.time.LocalDateTime;
 import java.util.Objects;
 
-@Entity
+@Entity(name = "MatchingChatRoomMember")
 @Table(
         name = "chat_room_members",
         uniqueConstraints = @UniqueConstraint(
