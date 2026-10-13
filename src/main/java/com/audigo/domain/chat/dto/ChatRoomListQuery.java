@@ -6,6 +6,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
 
 public record ChatRoomListQuery(
+        String chatName,
         Integer size,
         LocalDateTime cursorTime,
         Long cursorId
@@ -14,7 +15,12 @@ public record ChatRoomListQuery(
     private static final int MIN_SIZE = 1;
     private static final int MAX_SIZE = 100;
 
-    public static ChatRoomListQuery from(String rawSize, String rawCursorTime, String rawCursorId) {
+    public static ChatRoomListQuery from(
+            String chatName,
+            String rawSize,
+            String rawCursorTime,
+            String rawCursorId
+    ) {
         Integer size = parseSize(rawSize);
         LocalDateTime cursorTime = parseCursorTime(rawCursorTime);
         Long cursorId = parseCursorId(rawCursorId);
@@ -23,7 +29,7 @@ public record ChatRoomListQuery(
             throw invalidRequest();
         }
 
-        return new ChatRoomListQuery(size, cursorTime, cursorId);
+        return new ChatRoomListQuery(chatName, size, cursorTime, cursorId);
     }
 
     private static Integer parseSize(String rawSize) {

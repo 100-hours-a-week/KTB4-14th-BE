@@ -6,6 +6,8 @@ import com.audigo.domain.chat.dto.ChatRoomListResponse;
 import com.audigo.domain.chat.repository.ChatMessageListRepository;
 import com.audigo.domain.chat.repository.ChatRoomListRepository;
 import com.audigo.domain.chat.repository.ChatRoomListRow;
+import com.audigo.global.error.BusinessException;
+import com.audigo.global.error.ErrorCode;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -16,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class ChatRoomListService {
 
     private static final int DEFAULT_SIZE = 20;
+    private static final int MAX_CHAT_NAME_LENGTH = 5;
 
     private final ChatRoomListRepository chatRoomListRepository;
     private final ChatMessageListRepository chatMessageListRepository;
@@ -33,11 +36,13 @@ public class ChatRoomListService {
 
     @Transactional(readOnly = true)
     public ChatRoomListResponse list(Long userId, ChatRoomListQuery query) {
+        String chatName = normalizeChatName(query.chatName());
         int pageSize = query.size() == null ? DEFAULT_SIZE : query.size();
         LocalDateTime cursorTime = query.cursorTime();
 
         List<ChatRoomListRow> fetchedRows = chatRoomListRepository.findPage(
                 userId,
+                chatName,
                 cursorTime,
                 query.cursorId(),
                 pageSize + 1
@@ -78,5 +83,17 @@ public class ChatRoomListService {
                 lastRow == null ? null : lastRow.roomId(),
                 hasNext
         );
+    }
+
+    private String normalizeChatName(String chatName) {
+        if (chatName == null) {
+            return null;
+        }
+
+        String normalized = chatName.trim();
+        if (normalized.isEmpty() || normalized.length() > MAX_CHAT_NAME_LENGTH) {
+            throw new BusinessException(ErrorCode.INVALID_REQUEST);
+        }
+        return normalized;
     }
 }
