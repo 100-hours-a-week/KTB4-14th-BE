@@ -22,11 +22,12 @@ public class ChatRoomController {
 
     @GetMapping("/api/v2/chat/rooms")
     public ApiResponse<ChatRoomListResponse> list(
+            @RequestParam(name = "chat_name", required = false) String chatName,
             @RequestParam(required = false) String size,
             @RequestParam(name = "cursor_time", required = false) String cursorTime,
             @RequestParam(name = "cursor_id", required = false) String cursorId
     ) {
-        ChatRoomListQuery query = ChatRoomListQuery.from(size, cursorTime, cursorId);
+        ChatRoomListQuery query = ChatRoomListQuery.from(chatName, size, cursorTime, cursorId);
         return ApiResponse.of(
                 "chat_rooms_loading_success",
                 chatRoomListService.list(currentUser.id(), query)

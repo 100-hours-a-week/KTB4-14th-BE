@@ -17,6 +17,7 @@ public class ChatRoomListRepository {
 
     public List<ChatRoomListRow> findPage(
             Long userId,
+            String chatName,
             LocalDateTime cursorTime,
             Long cursorId,
             int limit
@@ -44,6 +45,10 @@ public class ChatRoomListRepository {
                   )
                 """);
 
+        if (chatName != null) {
+            sql.append(" AND other_user.nickname LIKE :chatName ESCAPE '!'");
+        }
+
         if (cursorTime != null) {
             sql.append("""
                     AND (
@@ -57,6 +62,9 @@ public class ChatRoomListRepository {
 
         Query query = entityManager.createNativeQuery(sql.toString())
                 .setParameter("userId", userId);
+        if (chatName != null) {
+            query.setParameter("chatName", "%" + escapeLikePattern(chatName) + "%");
+        }
         if (cursorTime != null) {
             query.setParameter("cursorTime", cursorTime);
             query.setParameter("cursorId", cursorId);
@@ -66,6 +74,13 @@ public class ChatRoomListRepository {
         @SuppressWarnings("unchecked")
         List<Object[]> results = query.getResultList();
         return results.stream().map(this::toRow).toList();
+    }
+
+    private String escapeLikePattern(String value) {
+        return value
+                .replace("!", "!!")
+                .replace("%", "!%")
+                .replace("_", "!_");
     }
 
     private ChatRoomListRow toRow(Object[] columns) {
