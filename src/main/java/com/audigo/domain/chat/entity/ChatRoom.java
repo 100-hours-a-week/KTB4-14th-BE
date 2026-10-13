@@ -40,6 +40,9 @@ public class ChatRoom {
     @Column(name = "last_message_at")
     private LocalDateTime lastMessageAt;
 
+    @Column(name = "last_message_sequence", nullable = false, columnDefinition = "BIGINT NOT NULL DEFAULT 0")
+    private long lastMessageSequence;
+
     protected ChatRoom() {
     }
 
@@ -48,5 +51,19 @@ public class ChatRoom {
         if (createdAt == null) {
             createdAt = LocalDateTime.now();
         }
+    }
+
+    public Long getId() {
+        return id;
+    }
+
+    public ChatRoomStatus getStatus() {
+        return status;
+    }
+
+    public long recordMessage(LocalDateTime sentAt) {
+        lastMessageSequence += 1;
+        lastMessageAt = sentAt;
+        return lastMessageSequence;
     }
 }

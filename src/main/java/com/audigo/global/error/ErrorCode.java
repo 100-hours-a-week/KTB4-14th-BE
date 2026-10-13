@@ -22,11 +22,14 @@ public enum ErrorCode {
     MATCH_CONNECTION_NOT_FOUND(HttpStatus.NOT_FOUND, "match_connection_not_found"),
     INVALID_NOTIFICATION_REQUEST(HttpStatus.BAD_REQUEST, "invalid_notification_request"),
     DUPLICATED_REQUIRED_PLACE(HttpStatus.CONFLICT, "duplicated_required_place"),
+    CHAT_ROOM_ENDED(HttpStatus.CONFLICT, "chat_room_ended"),
+    IDEMPOTENCY_KEY_CONFLICT(HttpStatus.CONFLICT, "idempotency_key_conflict"),
     TRAVEL_GENERATION_IN_PROGRESS(HttpStatus.CONFLICT, "travel_generation_in_progress"),
     OVERLAPPING_CONFIRMED_TRAVEL(HttpStatus.CONFLICT, "overlapping_confirmed_travel"),
     VALIDATION_FAILED(HttpStatus.UNPROCESSABLE_ENTITY, "validation_failed"),
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "internal_server_error"),
     EXTERNAL_API_ERROR(HttpStatus.BAD_GATEWAY, "external_api_error"),
+    CHAT_MESSAGE_RATE_LIMIT_EXCEEDED(HttpStatus.TOO_MANY_REQUESTS, "chat_message_rate_limit_exceeded"),
     SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "service_unavailable");
 
     private final HttpStatus status;
