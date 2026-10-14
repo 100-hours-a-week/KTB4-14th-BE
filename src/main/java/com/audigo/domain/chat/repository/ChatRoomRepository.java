@@ -12,6 +12,8 @@ import org.springframework.stereotype.Repository;
 @Repository("chatDomainRoomRepository")
 public interface ChatRoomRepository extends JpaRepository<ChatRoom, Long> {
 
+    Optional<ChatRoom> findByMatchConnectionId(Long matchConnectionId);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select room from ChatRoom room where room.id = :roomId")
     Optional<ChatRoom> findByIdForUpdate(@Param("roomId") Long roomId);

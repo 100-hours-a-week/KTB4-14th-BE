@@ -12,13 +12,18 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import java.time.LocalDateTime;
+import java.util.Objects;
 
 @Entity
 @Table(
         name = "chat_room_members",
+        uniqueConstraints = @UniqueConstraint(
+                name = "uk_chat_room_members_room_user",
+                columnNames = {"chat_room_id", "user_id"}
+        ),
         indexes = {
-                @Index(name = "idx_chat_room_members_room_user", columnList = "chat_room_id,user_id"),
                 @Index(name = "idx_chat_room_members_user_deleted", columnList = "user_id,deleted_at")
         }
 )
@@ -44,6 +49,13 @@ public class ChatRoomMember {
     private LocalDateTime deletedAt;
 
     protected ChatRoomMember() {
+    }
+
+    public static ChatRoomMember create(ChatRoom chatRoom, User user) {
+        ChatRoomMember member = new ChatRoomMember();
+        member.chatRoom = Objects.requireNonNull(chatRoom, "채팅방은 필수입니다.");
+        member.user = Objects.requireNonNull(user, "사용자는 필수입니다.");
+        return member;
     }
 
     @PrePersist
