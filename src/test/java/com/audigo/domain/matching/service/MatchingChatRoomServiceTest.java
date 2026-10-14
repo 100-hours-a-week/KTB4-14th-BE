@@ -13,7 +13,7 @@ import com.audigo.domain.matching.entity.ChatRoomStatus;
 import com.audigo.domain.matching.entity.MatchConnection;
 import com.audigo.domain.matching.entity.MatchingRequest;
 import com.audigo.domain.matching.entity.PreferredCompanionGender;
-import com.audigo.domain.matching.repository.ChatRoomRepository;
+import com.audigo.domain.matching.repository.MatchingChatRoomRepository;
 import com.audigo.domain.matching.repository.MatchConnectionRepository;
 import com.audigo.domain.travel.entity.TravelPaceType;
 import com.audigo.domain.travel.entity.TravelThemeType;
@@ -36,7 +36,7 @@ class MatchingChatRoomServiceTest {
     private MatchConnectionRepository matchConnectionRepository;
 
     @Mock
-    private ChatRoomRepository chatRoomRepository;
+    private MatchingChatRoomRepository chatRoomRepository;
 
     @InjectMocks
     private MatchingChatRoomService matchingChatRoomService;
@@ -44,7 +44,7 @@ class MatchingChatRoomServiceTest {
     @Test
     void prepares_new_chat_room_for_match_connection() {
         MatchConnection connection = matchConnection();
-        when(matchConnectionRepository.findById(30L)).thenReturn(Optional.of(connection));
+        when(matchConnectionRepository.findByIdForUpdate(30L)).thenReturn(Optional.of(connection));
         when(chatRoomRepository.findByMatchConnection_Id(30L)).thenReturn(Optional.empty());
         when(chatRoomRepository.save(any(ChatRoom.class))).thenAnswer(invocation -> {
             ChatRoom chatRoom = invocation.getArgument(0);
@@ -71,7 +71,7 @@ class MatchingChatRoomServiceTest {
                 connection.getTargetUser()
         );
         ReflectionTestUtils.setField(existing, "id", 40L);
-        when(matchConnectionRepository.findById(30L)).thenReturn(Optional.of(connection));
+        when(matchConnectionRepository.findByIdForUpdate(30L)).thenReturn(Optional.of(connection));
         when(chatRoomRepository.findByMatchConnection_Id(30L)).thenReturn(Optional.of(existing));
 
         MatchingChatRoomResponse response = matchingChatRoomService.prepareChatRoom(22L, 30L);
@@ -83,7 +83,7 @@ class MatchingChatRoomServiceTest {
 
     @Test
     void rejects_when_match_connection_not_found() {
-        when(matchConnectionRepository.findById(30L)).thenReturn(Optional.empty());
+        when(matchConnectionRepository.findByIdForUpdate(30L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> matchingChatRoomService.prepareChatRoom(1L, 30L))
                 .isInstanceOfSatisfying(BusinessException.class, exception ->
@@ -93,11 +93,11 @@ class MatchingChatRoomServiceTest {
 
     @Test
     void rejects_when_user_is_not_match_connection_member() {
-        when(matchConnectionRepository.findById(30L)).thenReturn(Optional.of(matchConnection()));
+        when(matchConnectionRepository.findByIdForUpdate(30L)).thenReturn(Optional.of(matchConnection()));
 
         assertThatThrownBy(() -> matchingChatRoomService.prepareChatRoom(99L, 30L))
                 .isInstanceOfSatisfying(BusinessException.class, exception ->
-                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN)
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.MATCH_CONNECTION_NOT_FOUND)
                 );
     }
 

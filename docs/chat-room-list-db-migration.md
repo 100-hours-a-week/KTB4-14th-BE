@@ -24,7 +24,7 @@ CREATE TABLE chat_room_members (
     joined_at DATETIME NOT NULL,
     deleted_at DATETIME NULL,
     PRIMARY KEY (id),
-    KEY idx_chat_room_members_room_user (chat_room_id, user_id),
+    UNIQUE KEY uk_chat_room_members_room_user (chat_room_id, user_id),
     KEY idx_chat_room_members_user_deleted (user_id, deleted_at),
     CONSTRAINT fk_chat_room_members_room
         FOREIGN KEY (chat_room_id) REFERENCES chat_rooms (id),
