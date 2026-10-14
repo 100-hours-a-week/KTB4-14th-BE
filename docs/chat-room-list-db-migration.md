@@ -53,7 +53,7 @@ CREATE TABLE chat_message_reads (
     user_id BIGINT NOT NULL,
     read_at DATETIME NOT NULL,
     PRIMARY KEY (id),
-    KEY idx_chat_message_reads_user_message (user_id, message_id),
+    UNIQUE KEY uk_chat_message_reads_user_message (user_id, message_id),
     CONSTRAINT fk_chat_message_reads_message
         FOREIGN KEY (message_id) REFERENCES chat_messages (id),
     CONSTRAINT fk_chat_message_reads_user
