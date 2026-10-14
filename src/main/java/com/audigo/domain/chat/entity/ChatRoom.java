@@ -66,4 +66,8 @@ public class ChatRoom {
         lastMessageAt = sentAt;
         return lastMessageSequence;
     }
+
+    public void end() {
+        status = ChatRoomStatus.ENDED;
+    }
 }
