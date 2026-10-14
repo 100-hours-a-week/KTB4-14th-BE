@@ -100,4 +100,8 @@ public class ChatRoom {
         String normalized = value.trim();
         return normalized.length() <= 20 ? normalized : normalized.substring(0, 20);
     }
+
+    public void end() {
+        status = ChatRoomStatus.ENDED;
+    }
 }

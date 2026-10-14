@@ -64,4 +64,10 @@ public class ChatRoomMember {
             joinedAt = LocalDateTime.now();
         }
     }
+
+    public void leave(LocalDateTime leftAt) {
+        if (deletedAt == null) {
+            deletedAt = leftAt;
+        }
+    }
 }

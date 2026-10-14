@@ -18,6 +18,7 @@ public enum ErrorCode {
     REGION_NOT_FOUND(HttpStatus.NOT_FOUND, "region_not_found"),
     NOTIFICATION_NOT_FOUND(HttpStatus.NOT_FOUND, "notification_not_found"),
     CHAT_ROOM_NOT_FOUND(HttpStatus.NOT_FOUND, "chat_room_not_found"),
+    NOT_FOUND_CHAT_ROOM(HttpStatus.NOT_FOUND, "not_found_chat_room"),
     MATCHING_REQUEST_NOT_FOUND(HttpStatus.NOT_FOUND, "matching_request_not_found"),
     MATCH_CONNECTION_NOT_FOUND(HttpStatus.NOT_FOUND, "match_connection_not_found"),
     INVALID_NOTIFICATION_REQUEST(HttpStatus.BAD_REQUEST, "invalid_notification_request"),
