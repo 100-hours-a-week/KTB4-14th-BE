@@ -1,16 +1,14 @@
 package com.audigo.domain.matching.service;
 
-import com.audigo.domain.matching.dto.MatchingChatRoomResponse;
-import com.audigo.domain.matching.entity.ChatRoom;
+import com.audigo.domain.chat.dto.ChatRoomPreparationResponse;
+import com.audigo.domain.chat.service.ChatRoomPreparationService;
+import com.audigo.domain.chat.service.ChatRoomPreparationService.PreparationResult;
 import com.audigo.domain.matching.entity.MatchConnection;
 import com.audigo.domain.matching.entity.MatchConnectionStatus;
-import com.audigo.domain.matching.repository.MatchingChatRoomRepository;
 import com.audigo.domain.matching.repository.MatchConnectionRepository;
-import com.audigo.domain.user.entity.User;
 import com.audigo.global.error.BusinessException;
 import com.audigo.global.error.ErrorCode;
 import java.util.Objects;
-import java.util.Optional;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,18 +16,18 @@ import org.springframework.transaction.annotation.Transactional;
 public class MatchingChatRoomService {
 
     private final MatchConnectionRepository matchConnectionRepository;
-    private final MatchingChatRoomRepository chatRoomRepository;
+    private final ChatRoomPreparationService chatRoomPreparationService;
 
     public MatchingChatRoomService(
             MatchConnectionRepository matchConnectionRepository,
-            MatchingChatRoomRepository chatRoomRepository
+            ChatRoomPreparationService chatRoomPreparationService
     ) {
         this.matchConnectionRepository = matchConnectionRepository;
-        this.chatRoomRepository = chatRoomRepository;
+        this.chatRoomPreparationService = chatRoomPreparationService;
     }
 
     @Transactional
-    public MatchingChatRoomResponse prepareChatRoom(Long userId, Long matchConnectionId) {
+    public ChatRoomPreparationResponse prepareChatRoom(Long userId, Long matchConnectionId) {
         return prepareChatRoomInternal(userId, matchConnectionId).response();
     }
 
@@ -45,19 +43,11 @@ public class MatchingChatRoomService {
             throw new BusinessException(ErrorCode.MATCH_CONNECTION_NOT_FOUND);
         }
 
-        Optional<ChatRoom> existingRoom = chatRoomRepository.findByMatchConnection_Id(connection.getId());
-        if (existingRoom.isPresent()) {
-            return new PreparationResult(MatchingChatRoomResponse.from(existingRoom.get()), false);
-        }
-
-        ChatRoom createdRoom = chatRoomRepository.save(createChatRoom(connection));
-        return new PreparationResult(MatchingChatRoomResponse.from(createdRoom), true);
-    }
-
-    private ChatRoom createChatRoom(MatchConnection connection) {
-        User requester = connection.getMatchingRequest().getRequester();
-        User targetUser = connection.getTargetUser();
-        return ChatRoom.create(connection, chatName(requester, targetUser), requester, targetUser);
+        return chatRoomPreparationService.prepareForMatchConnection(
+                connection.getId(),
+                connection.getMatchingRequest().getRequester(),
+                connection.getTargetUser()
+        );
     }
 
     private boolean isParticipant(Long userId, MatchConnection connection) {
@@ -66,10 +56,4 @@ public class MatchingChatRoomService {
         return Objects.equals(userId, requesterId) || Objects.equals(userId, targetUserId);
     }
 
-    private String chatName(User requester, User targetUser) {
-        return requester.nickname() + " · " + targetUser.nickname();
-    }
-
-    public record PreparationResult(MatchingChatRoomResponse response, boolean created) {
-    }
 }

@@ -1,8 +1,8 @@
 package com.audigo.domain.matching.controller;
 
-import com.audigo.domain.matching.dto.MatchingChatRoomResponse;
+import com.audigo.domain.chat.dto.ChatRoomPreparationResponse;
 import com.audigo.domain.matching.service.MatchingChatRoomService;
-import com.audigo.domain.matching.service.MatchingChatRoomService.PreparationResult;
+import com.audigo.domain.chat.service.ChatRoomPreparationService.PreparationResult;
 import com.audigo.global.error.BusinessException;
 import com.audigo.global.error.ErrorCode;
 import com.audigo.global.response.ApiResponse;
@@ -30,7 +30,7 @@ public class MatchingChatRoomController {
     }
 
     @PostMapping("/{matchConnectionId}/chat-room")
-    public ResponseEntity<ApiResponse<MatchingChatRoomResponse>> prepareChatRoom(
+    public ResponseEntity<ApiResponse<ChatRoomPreparationResponse>> prepareChatRoom(
             @PathVariable String matchConnectionId
     ) {
         PreparationResult result = matchingChatRoomService.prepareChatRoomWithStatus(

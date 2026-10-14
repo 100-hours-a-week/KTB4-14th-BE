@@ -19,4 +19,13 @@ public interface ChatRoomMemberRepository extends JpaRepository<ChatRoomMember, 
               and member.deletedAt is null
             """)
     List<Long> findActiveOpponentUserIds(@Param("roomId") Long roomId, @Param("userId") Long userId);
+
+    @Query("""
+            select member.user.id
+            from ChatRoomMember member
+            where member.chatRoom.id = :roomId
+              and member.deletedAt is null
+            order by member.id
+            """)
+    List<Long> findActiveUserIds(@Param("roomId") Long roomId);
 }

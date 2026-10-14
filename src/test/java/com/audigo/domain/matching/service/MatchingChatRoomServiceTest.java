@@ -3,17 +3,18 @@ package com.audigo.domain.matching.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.audigo.domain.matching.dto.MatchingChatRoomResponse;
-import com.audigo.domain.matching.entity.ChatRoom;
-import com.audigo.domain.matching.entity.ChatRoomStatus;
+import com.audigo.domain.chat.dto.ChatRoomPreparationResponse;
+import com.audigo.domain.chat.entity.ChatRoomStatus;
+import com.audigo.domain.chat.service.ChatRoomPreparationService;
+import com.audigo.domain.chat.service.ChatRoomPreparationService.PreparationResult;
 import com.audigo.domain.matching.entity.MatchConnection;
 import com.audigo.domain.matching.entity.MatchingRequest;
 import com.audigo.domain.matching.entity.PreferredCompanionGender;
-import com.audigo.domain.matching.repository.MatchingChatRoomRepository;
 import com.audigo.domain.matching.repository.MatchConnectionRepository;
 import com.audigo.domain.travel.entity.TravelPaceType;
 import com.audigo.domain.travel.entity.TravelThemeType;
@@ -22,6 +23,7 @@ import com.audigo.global.error.BusinessException;
 import com.audigo.global.error.ErrorCode;
 import java.util.List;
 import java.util.Optional;
+import java.time.LocalDateTime;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -36,7 +38,7 @@ class MatchingChatRoomServiceTest {
     private MatchConnectionRepository matchConnectionRepository;
 
     @Mock
-    private MatchingChatRoomRepository chatRoomRepository;
+    private ChatRoomPreparationService chatRoomPreparationService;
 
     @InjectMocks
     private MatchingChatRoomService matchingChatRoomService;
@@ -45,40 +47,33 @@ class MatchingChatRoomServiceTest {
     void prepares_new_chat_room_for_match_connection() {
         MatchConnection connection = matchConnection();
         when(matchConnectionRepository.findByIdForUpdate(30L)).thenReturn(Optional.of(connection));
-        when(chatRoomRepository.findByMatchConnection_Id(30L)).thenReturn(Optional.empty());
-        when(chatRoomRepository.save(any(ChatRoom.class))).thenAnswer(invocation -> {
-            ChatRoom chatRoom = invocation.getArgument(0);
-            ReflectionTestUtils.setField(chatRoom, "id", 40L);
-            return chatRoom;
-        });
+        when(chatRoomPreparationService.prepareForMatchConnection(eq(30L), any(User.class), any(User.class)))
+                .thenReturn(new PreparationResult(chatRoomResponse(), true));
 
-        MatchingChatRoomResponse response = matchingChatRoomService.prepareChatRoom(1L, 30L);
+        PreparationResult result = matchingChatRoomService.prepareChatRoomWithStatus(1L, 30L);
+        ChatRoomPreparationResponse response = result.response();
 
         assertThat(response.chatRoomId()).isEqualTo(40L);
         assertThat(response.matchConnectionId()).isEqualTo(30L);
         assertThat(response.status()).isEqualTo(ChatRoomStatus.ACTIVE);
         assertThat(response.memberUserIds()).containsExactly(1L, 22L);
-        verify(chatRoomRepository).save(any(ChatRoom.class));
+        assertThat(result.created()).isTrue();
+        verify(chatRoomPreparationService).prepareForMatchConnection(eq(30L), any(User.class), any(User.class));
     }
 
     @Test
     void returns_existing_chat_room_for_match_connection() {
         MatchConnection connection = matchConnection();
-        ChatRoom existing = ChatRoom.create(
-                connection,
-                "윤혁 · 매칭후보",
-                connection.getMatchingRequest().getRequester(),
-                connection.getTargetUser()
-        );
-        ReflectionTestUtils.setField(existing, "id", 40L);
         when(matchConnectionRepository.findByIdForUpdate(30L)).thenReturn(Optional.of(connection));
-        when(chatRoomRepository.findByMatchConnection_Id(30L)).thenReturn(Optional.of(existing));
+        when(chatRoomPreparationService.prepareForMatchConnection(eq(30L), any(User.class), any(User.class)))
+                .thenReturn(new PreparationResult(chatRoomResponse(), false));
 
-        MatchingChatRoomResponse response = matchingChatRoomService.prepareChatRoom(22L, 30L);
+        PreparationResult result = matchingChatRoomService.prepareChatRoomWithStatus(22L, 30L);
 
-        assertThat(response.chatRoomId()).isEqualTo(40L);
-        assertThat(response.memberUserIds()).containsExactly(1L, 22L);
-        verify(chatRoomRepository, never()).save(any(ChatRoom.class));
+        assertThat(result.response().chatRoomId()).isEqualTo(40L);
+        assertThat(result.response().memberUserIds()).containsExactly(1L, 22L);
+        assertThat(result.created()).isFalse();
+        verify(chatRoomPreparationService).prepareForMatchConnection(eq(30L), any(User.class), any(User.class));
     }
 
     @Test
@@ -114,6 +109,17 @@ class MatchingChatRoomServiceTest {
         MatchConnection connection = MatchConnection.create(matchingRequest, activeUser(22L, "매칭후보"));
         ReflectionTestUtils.setField(connection, "id", 30L);
         return connection;
+    }
+
+    private ChatRoomPreparationResponse chatRoomResponse() {
+        return new ChatRoomPreparationResponse(
+                40L,
+                30L,
+                "윤혁 · 매칭후보",
+                ChatRoomStatus.ACTIVE,
+                List.of(1L, 22L),
+                LocalDateTime.of(2026, 10, 10, 15, 30)
+        );
     }
 
     private User activeUser(Long id, String nickname) {
