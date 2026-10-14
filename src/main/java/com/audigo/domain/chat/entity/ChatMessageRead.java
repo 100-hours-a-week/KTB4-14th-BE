@@ -7,16 +7,19 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
-import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import java.time.LocalDateTime;
 
 @Entity
 @Table(
         name = "chat_message_reads",
-        indexes = @Index(name = "idx_chat_message_reads_user_message", columnList = "user_id,message_id")
+        uniqueConstraints = @UniqueConstraint(
+                name = "uk_chat_message_reads_user_message",
+                columnNames = {"user_id", "message_id"}
+        )
 )
 public class ChatMessageRead {
 
