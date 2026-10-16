@@ -9,6 +9,11 @@ spring:
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: ${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:20}
+      minimum-idle: ${SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE:5}
+      connection-timeout: ${SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT:30000}
+
   jpa:
     hibernate:
       ddl-auto: ${JPA_DDL_AUTO:create}
@@ -73,3 +78,12 @@ audigo:
     connect-timeout-seconds: ${AUDIGO_AI_CONNECT_TIMEOUT_SECONDS:5}
     read-timeout-seconds: ${AUDIGO_AI_READ_TIMEOUT_SECONDS:330}
     job-timeout-seconds: ${AUDIGO_AI_JOB_TIMEOUT_SECONDS:300}
+    matching:
+      candidates-path: ${AUDIGO_AI_MATCHING_CANDIDATES_PATH:/api/ai/v1/matches/candidates}
+      mock-enabled: ${AUDIGO_AI_MATCHING_MOCK_ENABLED:false}
+      candidate-limit: ${AUDIGO_AI_MATCHING_CANDIDATE_LIMIT:3}
+
+sentry:
+  dsn: ${SENTRY_DSN:}
+  environment: ${SPRING_PROFILES_ACTIVE:local}
+  traces-sample-rate: 0.1
