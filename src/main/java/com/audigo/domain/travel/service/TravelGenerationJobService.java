@@ -36,6 +36,7 @@ public class TravelGenerationJobService {
 
     private final TravelGenerationJobRepository jobRepository;
     private final TravelGenerationProgressStore progressStore;
+    private final TravelGenerationPayloadStore payloadStore;
     private final TravelItineraryPersistenceService itineraryPersistenceService;
     private final NotificationService notificationService;
     private final ObjectMapper objectMapper;
@@ -43,12 +44,14 @@ public class TravelGenerationJobService {
     public TravelGenerationJobService(
             TravelGenerationJobRepository jobRepository,
             TravelGenerationProgressStore progressStore,
+            TravelGenerationPayloadStore payloadStore,
             TravelItineraryPersistenceService itineraryPersistenceService,
             NotificationService notificationService,
             ObjectMapper objectMapper
     ) {
         this.jobRepository = jobRepository;
         this.progressStore = progressStore;
+        this.payloadStore = payloadStore;
         this.itineraryPersistenceService = itineraryPersistenceService;
         this.notificationService = notificationService;
         this.objectMapper = objectMapper;
@@ -101,7 +104,7 @@ public class TravelGenerationJobService {
                 resolved.state()
         );
         if (resolved.kind() == EventKind.UNKNOWN && hasItineraryResult(event.data())) {
-            markResultStagesDone(jobId, event.data());
+            markResultStagesDone(job, event.data());
             completeIfReady(job);
             return;
         }
@@ -113,7 +116,7 @@ public class TravelGenerationJobService {
             return;
         }
         if (resolved.kind() == EventKind.COMPLETE) {
-            markResultStagesDone(jobId, event.data());
+            markResultStagesDone(job, event.data());
             completeIfReady(job);
             return;
         }
@@ -240,15 +243,16 @@ public class TravelGenerationJobService {
         );
     }
 
-    private void markResultStagesDone(Long jobId, String payload) {
+    private void markResultStagesDone(TravelGenerationJob job, String payload) {
         if (!hasItineraryResult(payload)) {
             return;
         }
+        payloadStore.saveResult(job.getId(), payload);
         REQUIRED_STAGES.forEach(stage -> progressStore.update(
-                jobId,
+                job.getId(),
                 stage,
                 TravelGenerationStageState.DONE,
-                payload
+                stage == TravelGenerationStage.ROUTE_OPTIMIZE ? payload : null
         ));
     }
 
