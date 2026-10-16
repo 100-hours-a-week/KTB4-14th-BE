@@ -82,6 +82,12 @@ audigo:
       candidates-path: ${AUDIGO_AI_MATCHING_CANDIDATES_PATH:/api/ai/v1/matches/candidates}
       mock-enabled: ${AUDIGO_AI_MATCHING_MOCK_ENABLED:false}
       candidate-limit: ${AUDIGO_AI_MATCHING_CANDIDATE_LIMIT:3}
+  sqs:
+    enabled: ${AUDIGO_SQS_ENABLED:false}
+    region: ${AWS_REGION:ap-northeast-2}
+    job-queue-url: ${AUDIGO_AI_JOB_QUEUE_URL:}
+    result-queue-url: ${AUDIGO_AI_RESULT_QUEUE_URL:}
+    endpoint: ${AUDIGO_SQS_ENDPOINT:}
 
 sentry:
   dsn: ${SENTRY_DSN:}
