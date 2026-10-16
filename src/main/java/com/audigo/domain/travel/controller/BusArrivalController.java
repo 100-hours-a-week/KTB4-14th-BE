@@ -7,6 +7,7 @@ import com.audigo.domain.travel.repository.TravelPlanRepository;
 import com.audigo.domain.travel.service.BusArrivalQueryService;
 import com.audigo.global.error.BusinessException;
 import com.audigo.global.error.ErrorCode;
+import com.audigo.global.migration.classify.PureRead;
 import com.audigo.global.response.ApiResponse;
 import com.audigo.global.security.CurrentUser;
 import java.time.LocalDateTime;
@@ -39,6 +40,7 @@ public class BusArrivalController {
         this.busArrivalQueryService = busArrivalQueryService;
     }
 
+    @PureRead(reason = "readOnly 트랜잭션 + 외부 도착정보 조회")
     @Transactional(readOnly = true)
     @GetMapping("/api/travel-plans/{travelPlanId}/routes/{routeSegmentId}/bus-arrivals")
     public ApiResponse<BusArrivalLookupResponse> getBusArrivals(

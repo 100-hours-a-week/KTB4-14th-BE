@@ -2,6 +2,7 @@ package com.audigo.domain.travel.controller;
 
 import com.audigo.domain.travel.dto.RegionResponse;
 import com.audigo.domain.travel.service.TravelPlanService;
+import com.audigo.global.migration.classify.PureRead;
 import com.audigo.global.response.ApiResponse;
 import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -18,6 +19,7 @@ public class RegionController {
         this.travelPlanService = travelPlanService;
     }
 
+    @PureRead(reason = "readOnly 트랜잭션 조회")
     @GetMapping
     public ApiResponse<List<RegionResponse>> getRegions() {
         return ApiResponse.of("regions_found", travelPlanService.getRegions());

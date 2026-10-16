@@ -40,6 +40,29 @@ KAKAO_REDIRECT_URI=http://localhost:5173/auth/kakao
 docker compose up -d mysql
 ```
 
+## Local ProxySQL
+
+The application connects to MySQL through ProxySQL. During DB cutover only the ProxySQL destination changes.
+
+```shell
+docker compose up -d mysql proxysql
+```
+
+```properties
+SPRING_DATASOURCE_URL=jdbc:mysql://localhost:6033/audigo?useLocalSessionState=true&useLocalTransactionState=true&cacheServerConfiguration=true
+DB_USERNAME=audigo
+DB_PASSWORD=audigo
+```
+
+`infra/mysql/init` runs only when the MySQL volume is empty. If the volume already exists, run the statements in `infra/mysql/init/01-proxysql-users.sql` once as root, or recreate the volume with `docker compose down -v`.
+
+Check that queries pass through ProxySQL:
+
+```shell
+mysql -h127.0.0.1 -P6032 -uradmin -pradmin \
+  -e "SELECT hostgroup, digest_text, count_star FROM stats_mysql_query_digest ORDER BY count_star DESC LIMIT 10;"
+```
+
 ## Run
 
 ```shell
