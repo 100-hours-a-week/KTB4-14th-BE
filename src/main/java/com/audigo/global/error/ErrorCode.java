@@ -24,7 +24,9 @@ public enum ErrorCode {
     VALIDATION_FAILED(HttpStatus.UNPROCESSABLE_ENTITY, "validation_failed"),
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "internal_server_error"),
     EXTERNAL_API_ERROR(HttpStatus.BAD_GATEWAY, "external_api_error"),
-    SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "service_unavailable");
+    SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "service_unavailable"),
+    MIGRATION_HOLD_TIMEOUT(HttpStatus.SERVICE_UNAVAILABLE, "migration_hold_timeout"),
+    MIGRATION_PENDING_QUEUE_FULL(HttpStatus.SERVICE_UNAVAILABLE, "migration_pending_queue_full");
 
     private final HttpStatus status;
     private final String message;
