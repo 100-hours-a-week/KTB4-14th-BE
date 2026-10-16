@@ -1,29 +1,32 @@
 package com.audigo.global.migration.gate;
 
 import com.audigo.global.migration.MigrationProperties;
+import com.audigo.global.migration.tracking.ActiveWriteTransactions;
+import com.audigo.global.migration.tracking.InFlightWorkTracker;
+import com.audigo.global.migration.tracking.TransactionWriteObserver;
 import com.audigo.global.migration.tracking.WorkTicket;
 import com.audigo.global.migration.tracking.WorkType;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.EnumMap;
-import java.util.LinkedHashMap;
+import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.TransactionDefinition;
 
 // 인스턴스 쓰기 단계와 진행 중 작업을 한 lock으로 관리한다.
 // 단계 확인 + 작업 등록, 단계 전이 + 잔여 작업 확인이 같은 임계 구역에서 일어나므로
 // drain 이후 입장한 쓰기가 freeze 판정을 빠져나가지 않는다.
+// 잔여 작업 = 열린 작업 티켓 + 진행 중인 쓰기 트랜잭션. 둘 다 0이어야 freeze 할 수 있다
 @Component
-public class MigrationWriteGate {
+public class MigrationWriteGate implements TransactionWriteObserver {
 
     private static final Logger log = LoggerFactory.getLogger(MigrationWriteGate.class);
     private static final Admission HOLD = new Admission.Hold();
@@ -36,9 +39,10 @@ public class MigrationWriteGate {
     private final ReentrantLock lock = new ReentrantLock();
     private final Condition drained = lock.newCondition();
 
-    // 04에서 InFlightWorkTracker로 교체. 삽입 순서 = 오래된 순
-    private final Map<Long, WorkTicket> inFlight = new LinkedHashMap<>();
-    private long nextTicketId = 1;
+    private final InFlightWorkTracker tracker = new InFlightWorkTracker();
+    private final ActiveWriteTransactions writeTransactions = new ActiveWriteTransactions();
+    // drain-timeout 이상 열린 티켓 중 이미 경고한 것
+    private final Set<Long> stuckWarnedTicketIds = new HashSet<>();
 
     private WritePhase phase = WritePhase.OPEN;
     // 마지막으로 적용한 명령의 migrationId·epoch. OPEN 복귀 후에도 남겨 오래된 명령을 거른다
@@ -83,7 +87,7 @@ public class MigrationWriteGate {
         Objects.requireNonNull(parent, "parent");
         lock.lock();
         try {
-            if (parent.isClosed() || inFlight.get(parent.id()) != parent) {
+            if (!tracker.isOpen(parent)) {
                 throw new IllegalStateException("부모 티켓이 열려 있지 않다: " + parent);
             }
             return new Admission.Admitted(openTicket(WorkType.AI_JOB, description, parent.id()));
@@ -157,11 +161,13 @@ public class MigrationWriteGate {
             }
             return switch (phase) {
                 case DRAINING -> {
-                    if (!inFlight.isEmpty()) {
-                        List<WorkTicket> remaining = new ArrayList<>(inFlight.values());
-                        log.warn("migration_command_rejected command=freeze reason={} migration_id={} epoch={} remaining={}",
-                                TransitionFailure.REMAINING_WORK, command.migrationId(), command.epoch(), remaining.size());
-                        yield TransitionResult.remainingWork(snapshotLocked(), remaining);
+                    if (!isDrainedLocked()) {
+                        List<WorkTicket> remaining = tracker.openTickets();
+                        log.warn("migration_command_rejected command=freeze reason={} migration_id={} epoch={} remaining_tickets={} remaining_transactions={}",
+                                TransitionFailure.REMAINING_WORK, command.migrationId(), command.epoch(),
+                                remaining.size(), writeTransactions.count());
+                        warnStuckTickets(remaining);
+                        yield TransitionResult.remainingWork(snapshotLocked(), remaining, writeTransactions.list());
                     }
                     frozenAt = now();
                     changePhase(WritePhase.FROZEN);
@@ -228,18 +234,43 @@ public class MigrationWriteGate {
         }
     }
 
-    // 진행 중 작업이 0이 될 때까지 기다린다. 시간 안에 0이 되면 true
+    // 열린 티켓과 쓰기 트랜잭션이 모두 0이 될 때까지 기다린다. 시간 안에 0이 되면 true
     public boolean awaitDrained(Duration timeout) throws InterruptedException {
         long remainingNanos = Objects.requireNonNull(timeout, "timeout").toNanos();
         lock.lock();
         try {
-            while (!inFlight.isEmpty()) {
+            while (!isDrainedLocked()) {
                 if (remainingNanos <= 0) {
                     return false;
                 }
                 remainingNanos = drained.awaitNanos(remainingNanos);
             }
             return true;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    // ---- 쓰기 트랜잭션 추적 (MigrationAwareJpaTransactionManager가 호출) ----
+
+    // FROZEN 중 쓰기 트랜잭션 거부는 07에서 추가한다
+    @Override
+    public void beforeWriteBegin(Object transaction, TransactionDefinition definition) {
+        lock.lock();
+        try {
+            writeTransactions.begin(transaction, definition.getName(), now());
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    @Override
+    public void afterCompletion(Object transaction) {
+        lock.lock();
+        try {
+            if (writeTransactions.complete(transaction, now())) {
+                signalIfDrained();
+            }
         } finally {
             lock.unlock();
         }
@@ -266,19 +297,40 @@ public class MigrationWriteGate {
     // ---- 내부 ----
 
     private WorkTicket openTicket(WorkType type, String description, Long parentId) {
-        WorkTicket ticket = new WorkTicket(nextTicketId++, type, description, parentId, now(), this::release);
-        inFlight.put(ticket.id(), ticket);
-        return ticket;
+        return tracker.open(type, description, parentId, now(), this::release);
     }
 
     private void release(WorkTicket ticket) {
         lock.lock();
         try {
-            if (inFlight.remove(ticket.id(), ticket) && inFlight.isEmpty()) {
-                drained.signalAll();
+            if (tracker.release(ticket)) {
+                stuckWarnedTicketIds.remove(ticket.id());
+                signalIfDrained();
             }
         } finally {
             lock.unlock();
+        }
+    }
+
+    private boolean isDrainedLocked() {
+        return tracker.total() == 0 && writeTransactions.count() == 0;
+    }
+
+    private void signalIfDrained() {
+        if (isDrainedLocked()) {
+            drained.signalAll();
+        }
+    }
+
+    private void warnStuckTickets(List<WorkTicket> openTickets) {
+        Instant now = now();
+        Duration limit = properties.drainTimeout();
+        for (WorkTicket ticket : openTickets) {
+            Duration age = Duration.between(ticket.openedAt(), now);
+            if (age.compareTo(limit) >= 0 && stuckWarnedTicketIds.add(ticket.id())) {
+                log.warn("migration_ticket_stuck ticket_id={} type={} description={} thread={} age_ms={}",
+                        ticket.id(), ticket.type(), ticket.description(), ticket.threadName(), age.toMillis());
+            }
         }
     }
 
@@ -326,20 +378,15 @@ public class MigrationWriteGate {
     }
 
     private GateSnapshot snapshotLocked() {
-        EnumMap<WorkType, Integer> byType = new EnumMap<>(WorkType.class);
-        for (WorkType type : WorkType.values()) {
-            byType.put(type, 0);
-        }
-        for (WorkTicket ticket : inFlight.values()) {
-            byType.merge(ticket.type(), 1, Integer::sum);
-        }
         return new GateSnapshot(
                 phase,
                 migrationId,
                 epoch,
                 resumeTarget,
-                inFlight.size(),
-                byType,
+                tracker.total(),
+                tracker.countByType(),
+                writeTransactions.count(),
+                writeTransactions.lastCompletedAt(),
                 drainStartedAt,
                 frozenAt,
                 resumeStartedAt,

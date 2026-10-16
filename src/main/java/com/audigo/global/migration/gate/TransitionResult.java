@@ -1,5 +1,6 @@
 package com.audigo.global.migration.gate;
 
+import com.audigo.global.migration.tracking.ActiveWriteTransaction;
 import com.audigo.global.migration.tracking.WorkTicket;
 import java.util.List;
 
@@ -7,7 +8,8 @@ public record TransitionResult(
         Outcome outcome,
         TransitionFailure failure,
         GateSnapshot snapshot,
-        List<WorkTicket> remainingWork
+        List<WorkTicket> remainingWork,
+        List<ActiveWriteTransaction> remainingTransactions
 ) {
 
     public enum Outcome {
@@ -21,22 +23,33 @@ public record TransitionResult(
 
     public TransitionResult {
         remainingWork = remainingWork == null ? List.of() : List.copyOf(remainingWork);
+        remainingTransactions = remainingTransactions == null ? List.of() : List.copyOf(remainingTransactions);
     }
 
     static TransitionResult applied(GateSnapshot snapshot) {
-        return new TransitionResult(Outcome.APPLIED, null, snapshot, List.of());
+        return new TransitionResult(Outcome.APPLIED, null, snapshot, List.of(), List.of());
     }
 
     static TransitionResult idempotent(GateSnapshot snapshot) {
-        return new TransitionResult(Outcome.IDEMPOTENT, null, snapshot, List.of());
+        return new TransitionResult(Outcome.IDEMPOTENT, null, snapshot, List.of(), List.of());
     }
 
     static TransitionResult rejected(TransitionFailure failure, GateSnapshot snapshot) {
-        return new TransitionResult(Outcome.REJECTED, failure, snapshot, List.of());
+        return new TransitionResult(Outcome.REJECTED, failure, snapshot, List.of(), List.of());
     }
 
-    static TransitionResult remainingWork(GateSnapshot snapshot, List<WorkTicket> remainingWork) {
-        return new TransitionResult(Outcome.REJECTED, TransitionFailure.REMAINING_WORK, snapshot, remainingWork);
+    static TransitionResult remainingWork(
+            GateSnapshot snapshot,
+            List<WorkTicket> remainingWork,
+            List<ActiveWriteTransaction> remainingTransactions
+    ) {
+        return new TransitionResult(
+                Outcome.REJECTED,
+                TransitionFailure.REMAINING_WORK,
+                snapshot,
+                remainingWork,
+                remainingTransactions
+        );
     }
 
     public boolean isSuccess() {

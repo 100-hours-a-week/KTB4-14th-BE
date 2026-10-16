@@ -13,6 +13,8 @@ public record GateSnapshot(
         ResumeTarget resumeTarget,
         int inFlightTotal,
         Map<WorkType, Integer> inFlightByType,
+        int activeWriteTransactions,
+        Instant lastWriteCompletedAt,
         Instant drainStartedAt,
         Instant frozenAt,
         Instant resumeStartedAt,
