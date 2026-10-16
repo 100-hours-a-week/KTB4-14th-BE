@@ -1,64 +1,77 @@
 package com.audigo.domain.travel.service;
 
+import com.audigo.domain.travel.entity.TravelGenerationJob;
+import com.audigo.domain.travel.entity.TravelGenerationProgress;
 import com.audigo.domain.travel.entity.TravelGenerationStage;
 import com.audigo.domain.travel.entity.TravelGenerationStageState;
+import com.audigo.domain.travel.repository.TravelGenerationJobRepository;
+import com.audigo.domain.travel.repository.TravelGenerationProgressRepository;
+import com.audigo.global.error.BusinessException;
+import com.audigo.global.error.ErrorCode;
 import java.util.Collections;
 import java.util.EnumMap;
+import java.util.EnumSet;
+import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
-// SSE 단계 진행 상태와 일정 저장에 사용할 원문 결과를 보관
-// 서버가 재시작되면 초기화되며, 전체 작업 상태는 DB에서 복구
+// SSE 단계 진행 상태와 일정 저장에 사용할 원문 결과를 DB에 보관
 @Component
 public class TravelGenerationProgressStore {
 
-    private final Map<Long, Progress> progressByJob = new ConcurrentHashMap<>();
+    private final TravelGenerationProgressRepository progressRepository;
+    private final TravelGenerationJobRepository jobRepository;
 
+    public TravelGenerationProgressStore(
+            TravelGenerationProgressRepository progressRepository,
+            TravelGenerationJobRepository jobRepository
+    ) {
+        this.progressRepository = progressRepository;
+        this.jobRepository = jobRepository;
+    }
+
+    @Transactional
     public void initialize(Long jobId) {
-        progressByJob.put(jobId, new Progress());
+        TravelGenerationJob job = getJob(jobId);
+        EnumSet<TravelGenerationStage> existingStages = progressRepository.findAllByJobId(jobId).stream()
+                .map(TravelGenerationProgress::getStage)
+                .collect(() -> EnumSet.noneOf(TravelGenerationStage.class), EnumSet::add, EnumSet::addAll);
+        List<TravelGenerationProgress> missing = java.util.Arrays.stream(TravelGenerationStage.values())
+                .filter(stage -> !existingStages.contains(stage))
+                .map(stage -> TravelGenerationProgress.create(job, stage))
+                .toList();
+        if (!missing.isEmpty()) {
+            progressRepository.saveAll(missing);
+        }
     }
 
+    @Transactional
     public void update(Long jobId, TravelGenerationStage stage, TravelGenerationStageState state, String payload) {
-        progressByJob.computeIfAbsent(jobId, ignored -> new Progress())
-                .update(stage, state, payload);
+        TravelGenerationProgress progress = progressRepository.findByJobIdAndStage(jobId, stage)
+                .orElseGet(() -> TravelGenerationProgress.create(getJob(jobId), stage));
+        progress.update(state, payload);
+        progressRepository.save(progress);
     }
 
+    @Transactional(readOnly = true)
     public Map<TravelGenerationStage, TravelGenerationStageState> states(Long jobId) {
-        Progress progress = progressByJob.get(jobId);
-        return progress == null ? Map.of() : progress.states();
+        Map<TravelGenerationStage, TravelGenerationStageState> states =
+                new EnumMap<>(TravelGenerationStage.class);
+        progressRepository.findAllStatesByJobId(jobId)
+                .forEach(progress -> states.put(progress.getStage(), progress.getState()));
+        return Collections.unmodifiableMap(states);
     }
 
+    @Transactional(readOnly = true)
     public String payload(Long jobId, TravelGenerationStage stage) {
-        Progress progress = progressByJob.get(jobId);
-        return progress == null ? null : progress.payload(stage);
+        return progressRepository.findByJobIdAndStage(jobId, stage)
+                .map(TravelGenerationProgress::getPayload)
+                .orElse(null);
     }
 
-    private static final class Progress {
-        private final Map<TravelGenerationStage, TravelGenerationStageState> states =
-                new EnumMap<>(TravelGenerationStage.class);
-        private final Map<TravelGenerationStage, String> payloads =
-                new EnumMap<>(TravelGenerationStage.class);
-
-        private Progress() {
-            for (TravelGenerationStage stage : TravelGenerationStage.values()) {
-                states.put(stage, TravelGenerationStageState.PENDING);
-            }
-        }
-
-        private synchronized void update(TravelGenerationStage stage, TravelGenerationStageState state, String payload) {
-            states.put(stage, state);
-            if (payload != null && !payload.isBlank()) {
-                payloads.put(stage, payload);
-            }
-        }
-
-        private synchronized Map<TravelGenerationStage, TravelGenerationStageState> states() {
-            return Collections.unmodifiableMap(new EnumMap<>(states));
-        }
-
-        private synchronized String payload(TravelGenerationStage stage) {
-            return payloads.get(stage);
-        }
+    private TravelGenerationJob getJob(Long jobId) {
+        return jobRepository.findById(jobId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.VALIDATION_FAILED));
     }
 }

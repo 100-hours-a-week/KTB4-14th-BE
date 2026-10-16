@@ -14,26 +14,22 @@ public class TravelGenerationWorker {
 
     private final AiGenerationClient aiGenerationClient;
     private final TravelGenerationJobService jobService;
-    private final TravelGenerationContextStore contextStore;
+    private final TravelGenerationPayloadStore payloadStore;
 
     public TravelGenerationWorker(
             AiGenerationClient aiGenerationClient,
             TravelGenerationJobService jobService,
-            TravelGenerationContextStore contextStore
+            TravelGenerationPayloadStore payloadStore
     ) {
         this.aiGenerationClient = aiGenerationClient;
         this.jobService = jobService;
-        this.contextStore = contextStore;
+        this.payloadStore = payloadStore;
     }
 
     @Async("travelGenerationExecutor")
     public void run(Long jobId) {
         try {
-            AiTravelGenerationRequest request = contextStore.get(jobId);
-            if (request == null) {
-                jobService.markFailed(jobId, "여행 생성에 필요한 요청 정보가 없습니다.");
-                return;
-            }
+            AiTravelGenerationRequest request = payloadStore.getRequest(jobId);
             jobService.markStarted(jobId);
             aiGenerationClient.stream(request, event -> {
                 try {
@@ -47,8 +43,6 @@ public class TravelGenerationWorker {
         } catch (RuntimeException exception) {
             log.warn("AI 생성 작업에 실패했습니다. jobId={}", jobId, exception);
             jobService.markFailed(jobId, "AI 서버와 통신하는 중 오류가 발생했습니다.");
-        } finally {
-            contextStore.remove(jobId);
         }
     }
 }

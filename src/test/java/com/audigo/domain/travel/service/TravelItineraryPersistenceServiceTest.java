@@ -49,17 +49,21 @@ class TravelItineraryPersistenceServiceTest {
     @Mock
     private PlaceRepository placeRepository;
 
+    @Mock
+    private TravelGenerationPayloadStore payloadStore;
+
     private TravelGenerationProgressStore progressStore;
     private TravelItineraryMetadataStore metadataStore;
     private TravelItineraryPersistenceService service;
 
     @BeforeEach
     void setUp() {
-        progressStore = new TravelGenerationProgressStore();
+        progressStore = new InMemoryTravelGenerationProgressStore();
         metadataStore = new TravelItineraryMetadataStore();
         service = new TravelItineraryPersistenceService(
                 new ObjectMapper(),
                 progressStore,
+                payloadStore,
                 dayRepository,
                 itemRepository,
                 routeRepository,
@@ -95,10 +99,7 @@ class TravelItineraryPersistenceServiceTest {
         when(routeRepository.save(any(RouteSegment.class))).thenReturn(savedRoute);
         when(savedRoute.getId()).thenReturn(301L);
 
-        progressStore.update(1L,
-                com.audigo.domain.travel.entity.TravelGenerationStage.ROUTE_OPTIMIZE,
-                com.audigo.domain.travel.entity.TravelGenerationStageState.DONE,
-                """
+        when(payloadStore.getResult(1L)).thenReturn("""
                 {"result":{"route_segments":[
                   {"day_number":1,"from_sequence":1,"to_sequence":2,
                    "transport_type":"PUBLIC_TRANSPORT","duration_minutes":35,

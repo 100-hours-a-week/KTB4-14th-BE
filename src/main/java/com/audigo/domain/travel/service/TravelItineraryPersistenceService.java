@@ -47,6 +47,7 @@ public class TravelItineraryPersistenceService {
 
     private final ObjectMapper objectMapper;
     private final TravelGenerationProgressStore progressStore;
+    private final TravelGenerationPayloadStore payloadStore;
     private final ItineraryDayRepository dayRepository;
     private final ItineraryItemRepository itemRepository;
     private final RouteSegmentRepository routeRepository;
@@ -57,6 +58,7 @@ public class TravelItineraryPersistenceService {
     public TravelItineraryPersistenceService(
             ObjectMapper objectMapper,
             TravelGenerationProgressStore progressStore,
+            TravelGenerationPayloadStore payloadStore,
             ItineraryDayRepository dayRepository,
             ItineraryItemRepository itemRepository,
             RouteSegmentRepository routeRepository,
@@ -66,6 +68,7 @@ public class TravelItineraryPersistenceService {
     ) {
         this.objectMapper = objectMapper;
         this.progressStore = progressStore;
+        this.payloadStore = payloadStore;
         this.dayRepository = dayRepository;
         this.itemRepository = itemRepository;
         this.routeRepository = routeRepository;
@@ -78,7 +81,7 @@ public class TravelItineraryPersistenceService {
     @Transactional
     public boolean persistIfPresent(TravelGenerationJob job) {
         TravelPlan plan = job.getTravelPlan();
-        JsonNode result = findResult(job.getId());
+        JsonNode result = findResult(job);
         JsonNode daysNode = result == null ? null : result.get("days");
         if (daysNode == null || !daysNode.isArray() || daysNode.isEmpty()) {
             daysNode = fallbackDaysFromRequiredPlaces(result, plan);
@@ -186,21 +189,22 @@ public class TravelItineraryPersistenceService {
         return true;
     }
 
-    private JsonNode findResult(Long jobId) {
+    private JsonNode findResult(TravelGenerationJob job) {
+        JsonNode persistedResult = unwrapResult(parse(payloadStore.getResult(job.getId())));
+        if (persistedResult != null && persistedResult.isObject()) {
+            return persistedResult;
+        }
         ObjectNode merged = null;
         for (TravelGenerationStage stage : List.of(
                 TravelGenerationStage.ROUTE_OPTIMIZE,
                 TravelGenerationStage.STAY_RECOMMEND,
                 TravelGenerationStage.PLACE_RECOMMEND
         )) {
-            JsonNode candidate = parse(progressStore.payload(jobId, stage));
+            JsonNode candidate = parse(progressStore.payload(job.getId(), stage));
             if (candidate == null) {
                 continue;
             }
-            JsonNode result = candidate.get("result");
-            if (result != null && result.isObject()) {
-                candidate = result;
-            }
+            candidate = unwrapResult(candidate);
             if (!candidate.isObject()) {
                 continue;
             }
@@ -213,6 +217,14 @@ public class TravelItineraryPersistenceService {
             }
         }
         return merged;
+    }
+
+    private JsonNode unwrapResult(JsonNode candidate) {
+        if (candidate == null) {
+            return null;
+        }
+        JsonNode result = candidate.get("result");
+        return result != null && result.isObject() ? result : candidate;
     }
 
     private void mergeDays(ObjectNode target, JsonNode source) {

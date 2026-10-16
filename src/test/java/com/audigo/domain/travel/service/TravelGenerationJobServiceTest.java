@@ -36,6 +36,9 @@ class TravelGenerationJobServiceTest {
     private TravelItineraryPersistenceService persistenceService;
 
     @Mock
+    private TravelGenerationPayloadStore payloadStore;
+
+    @Mock
     private NotificationService notificationService;
 
     private TravelGenerationProgressStore progressStore;
@@ -46,10 +49,11 @@ class TravelGenerationJobServiceTest {
 
     @BeforeEach
     void setUp() {
-        progressStore = new TravelGenerationProgressStore();
+        progressStore = new InMemoryTravelGenerationProgressStore();
         service = new TravelGenerationJobService(
                 jobRepository,
                 progressStore,
+                payloadStore,
                 persistenceService,
                 notificationService,
                 new ObjectMapper()
