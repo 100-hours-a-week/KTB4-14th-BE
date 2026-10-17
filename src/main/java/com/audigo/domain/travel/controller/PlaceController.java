@@ -4,6 +4,7 @@ import com.audigo.domain.travel.dto.PlaceSearchResponse;
 import com.audigo.domain.travel.dto.LivePlaceResponse;
 import com.audigo.domain.travel.service.KakaoPlaceSearchService;
 import com.audigo.domain.travel.service.KakaoPlaceLiveLookupService;
+import com.audigo.global.migration.classify.PureRead;
 import com.audigo.global.response.ApiResponse;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -26,6 +27,7 @@ public class PlaceController {
         this.kakaoPlaceLiveLookupService = kakaoPlaceLiveLookupService;
     }
 
+    @PureRead(reason = "지역 조회 + 외부 장소 검색")
     @GetMapping("/search")
     public PlaceSearchResponse search(
             @RequestParam(name = "region_id") Long regionId,
@@ -36,6 +38,7 @@ public class PlaceController {
         return kakaoPlaceSearchService.search(regionId, keyword, page, size);
     }
 
+    @PureRead(reason = "외부 장소 실시간 조회")
     @GetMapping("/{provider}/{providerPlaceId}/live")
     public ApiResponse<LivePlaceResponse> lookupLive(
             @PathVariable String provider,

@@ -16,3 +16,7 @@ logs
 
 README.md
 docker-compose.yml
+
+# 이미지에 필요 없는 로컬 도구
+load-test
+infra/cutover
