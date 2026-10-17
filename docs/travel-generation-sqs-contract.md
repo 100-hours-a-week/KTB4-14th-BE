@@ -27,6 +27,7 @@ Backend -> AI Job Queue -> AI Worker -> AI Result Queue -> Backend -> DB
 | `AUDIGO_SQS_RESULT_MAX_MESSAGES` | `5` | 한 번에 수신할 Result 메시지 수(1~10개) |
 | `AUDIGO_SQS_RESULT_CONCURRENCY` | `2` | Result 메시지 DB 반영 동시성 |
 | `AUDIGO_SQS_RESULT_EXECUTOR_QUEUE_CAPACITY` | `20` | Result 처리 실행기의 내부 대기열 크기 |
+| `AUDIGO_SQS_RESULT_MAX_RECEIVE_COUNT` | `5` | DLQ 없이 재처리할 Result 메시지 최대 수신 횟수 |
 
 운영 환경은 Access Key를 애플리케이션 설정에 저장하지 않고 ECS Task Role을 사용한다. 로컬 환경은 AWS SDK 기본 자격 증명 체인의 프로필 또는 환경 변수를 사용한다.
 
@@ -105,9 +106,10 @@ AI Worker는 Backend DB를 조회하지 않으므로 `request`에 전체 AI 요�
 4. Standard Queue에서 진행 이벤트 순서가 바뀔 수 있으므로 단계 도착 순서를 실패 조건으로 사용하지 않는다.
 5. 진행 상태는 `PENDING -> RUNNING -> DONE` 방향으로만 반영하며 늦게 도착한 이전 상태는 무시한다.
 6. 진행 상태, 최종 일정 또는 실패 상태의 DB 트랜잭션이 커밋된 뒤 SQS 메시지를 삭제한다.
-7. 파싱 또는 DB 처리에 실패한 메시지는 삭제하지 않고 Visibility Timeout 이후 다시 수신한다.
+7. 파싱 또는 DB 처리에 실패한 메시지는 최대 수신 횟수 전까지 삭제하지 않고 Visibility Timeout 이후 다시 수신한다.
+8. 최대 수신 횟수에도 실패하면 메시지 원문과 오류를 Inbox에 `FAILED`로 보관하고 Queue에서 삭제한다.
 
-`event_id` 기반 중복 처리 방지와 반복 실패 메시지의 최종 처리 정책은 이슈 #137에서 추가한다.
+`event_id` 예약과 여행 결과 반영은 같은 DB 트랜잭션에서 처리한다. 이미 기록된 이벤트는 일정과 알림을 다시 반영하지 않고 메시지만 삭제한다.
 
 ## IAM 최소 권한
 
@@ -125,4 +127,4 @@ AI Worker는 Backend DB를 조회하지 않으므로 `request`에 전체 AI 요�
 
 - Outbox 저장과 AI Job Queue 발행: 이슈 #135 (`travel-generation-outbox-migration.md`)
 - AI Result Queue 소비와 결과 저장: 이슈 #136
-- 중복 처리와 최종 실패 복구: 이슈 #137
+- 중복 처리와 최종 실패 복구: 이슈 #137 (`travel-generation-result-inbox-migration.md`)

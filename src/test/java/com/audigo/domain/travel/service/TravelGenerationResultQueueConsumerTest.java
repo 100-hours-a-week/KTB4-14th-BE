@@ -2,6 +2,9 @@ package com.audigo.domain.travel.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -28,6 +31,7 @@ import org.springframework.core.task.SyncTaskExecutor;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.DeleteMessageRequest;
 import software.amazon.awssdk.services.sqs.model.Message;
+import software.amazon.awssdk.services.sqs.model.MessageSystemAttributeName;
 import software.amazon.awssdk.services.sqs.model.ReceiveMessageRequest;
 import software.amazon.awssdk.services.sqs.model.ReceiveMessageResponse;
 
@@ -37,7 +41,7 @@ class TravelGenerationResultQueueConsumerTest {
     @Mock
     private SqsClient sqsClient;
     @Mock
-    private TravelGenerationJobService jobService;
+    private TravelGenerationResultInboxService inboxService;
 
     private ObjectMapper objectMapper;
     private TravelGenerationResultQueueConsumer consumer;
@@ -54,9 +58,9 @@ class TravelGenerationResultQueueConsumerTest {
                         "https://sqs.example/result",
                         ""
                 ),
-                new TravelResultQueueProperties(20, 5, 2, 20),
+                new TravelResultQueueProperties(20, 5, 2, 20, 5),
                 objectMapper,
-                jobService,
+                inboxService,
                 new SyncTaskExecutor()
         );
     }
@@ -67,12 +71,19 @@ class TravelGenerationResultQueueConsumerTest {
         Message sqsMessage = message(objectMapper.writeValueAsString(result));
         when(sqsClient.receiveMessage(any(ReceiveMessageRequest.class)))
                 .thenReturn(ReceiveMessageResponse.builder().messages(sqsMessage).build());
+        when(inboxService.process(any(), anyString(), anyString(), anyInt()))
+                .thenReturn(TravelGenerationResultInboxService.ProcessingResult.PROCESSED);
 
         consumer.poll();
 
         ArgumentCaptor<TravelGenerationResultMessage> resultCaptor =
                 ArgumentCaptor.forClass(TravelGenerationResultMessage.class);
-        verify(jobService).handleResultMessage(resultCaptor.capture());
+        verify(inboxService).process(
+                resultCaptor.capture(),
+                eq("sqs-message-1"),
+                anyString(),
+                eq(1)
+        );
         assertThat(resultCaptor.getValue().eventId()).isEqualTo(result.eventId());
         assertThat(resultCaptor.getValue().generationJobId()).isEqualTo(result.generationJobId());
         assertThat(resultCaptor.getValue().type()).isEqualTo(result.type());
@@ -89,7 +100,7 @@ class TravelGenerationResultQueueConsumerTest {
         when(sqsClient.receiveMessage(any(ReceiveMessageRequest.class)))
                 .thenReturn(ReceiveMessageResponse.builder().messages(sqsMessage).build());
         doThrow(new IllegalStateException("DB unavailable"))
-                .when(jobService).handleResultMessage(any(TravelGenerationResultMessage.class));
+                .when(inboxService).process(any(), anyString(), anyString(), anyInt());
 
         consumer.poll();
 
@@ -104,7 +115,60 @@ class TravelGenerationResultQueueConsumerTest {
 
         consumer.poll();
 
-        verify(jobService, never()).handleResultMessage(any());
+        verify(inboxService, never()).process(any(), anyString(), anyString(), anyInt());
+        verify(inboxService, never()).archiveFailure(anyString(), anyString(), anyInt(), any(), any());
+        verify(sqsClient, never()).deleteMessage(any(DeleteMessageRequest.class));
+    }
+
+    @Test
+    void 최대_수신_횟수의_파싱_실패_메시지는_DB에_보관하고_삭제한다() {
+        Message sqsMessage = message("not-json", 5);
+        when(sqsClient.receiveMessage(any(ReceiveMessageRequest.class)))
+                .thenReturn(ReceiveMessageResponse.builder().messages(sqsMessage).build());
+
+        consumer.poll();
+
+        verify(inboxService).archiveFailure(
+                eq("sqs-message-1"),
+                eq("not-json"),
+                eq(5),
+                eq(null),
+                any()
+        );
+        verify(sqsClient).deleteMessage(any(DeleteMessageRequest.class));
+    }
+
+    @Test
+    void 최대_수신_횟수의_DB_실패_메시지는_DB에_보관하고_삭제한다() throws Exception {
+        TravelGenerationResultMessage result = progressMessage();
+        Message sqsMessage = message(objectMapper.writeValueAsString(result), 5);
+        when(sqsClient.receiveMessage(any(ReceiveMessageRequest.class)))
+                .thenReturn(ReceiveMessageResponse.builder().messages(sqsMessage).build());
+        doThrow(new IllegalStateException("DB unavailable"))
+                .when(inboxService).process(any(), anyString(), anyString(), anyInt());
+
+        consumer.poll();
+
+        verify(inboxService).archiveFailure(
+                eq("sqs-message-1"),
+                anyString(),
+                eq(5),
+                any(TravelGenerationResultMessage.class),
+                any()
+        );
+        verify(sqsClient).deleteMessage(any(DeleteMessageRequest.class));
+    }
+
+    @Test
+    void 실패_메시지를_DB에_보관하지_못하면_SQS에서_삭제하지_않는다() {
+        Message sqsMessage = message("not-json", 5);
+        when(sqsClient.receiveMessage(any(ReceiveMessageRequest.class)))
+                .thenReturn(ReceiveMessageResponse.builder().messages(sqsMessage).build());
+        doThrow(new IllegalStateException("Inbox unavailable"))
+                .when(inboxService).archiveFailure(anyString(), anyString(), anyInt(), any(), any());
+
+        consumer.poll();
+
         verify(sqsClient, never()).deleteMessage(any(DeleteMessageRequest.class));
     }
 
@@ -120,6 +184,8 @@ class TravelGenerationResultQueueConsumerTest {
         assertThat(receiveCaptor.getValue().queueUrl()).isEqualTo("https://sqs.example/result");
         assertThat(receiveCaptor.getValue().waitTimeSeconds()).isEqualTo(20);
         assertThat(receiveCaptor.getValue().maxNumberOfMessages()).isEqualTo(5);
+        assertThat(receiveCaptor.getValue().messageSystemAttributeNames())
+                .contains(MessageSystemAttributeName.APPROXIMATE_RECEIVE_COUNT);
     }
 
     private TravelGenerationResultMessage progressMessage() {
@@ -137,10 +203,20 @@ class TravelGenerationResultQueueConsumerTest {
     }
 
     private Message message(String body) {
-        return Message.builder()
+        return message(body, null);
+    }
+
+    private Message message(String body, Integer receiveCount) {
+        Message.Builder builder = Message.builder()
                 .messageId("sqs-message-1")
                 .receiptHandle("receipt-1")
-                .body(body)
-                .build();
+                .body(body);
+        if (receiveCount != null) {
+            builder.attributes(java.util.Map.of(
+                    MessageSystemAttributeName.APPROXIMATE_RECEIVE_COUNT,
+                    receiveCount.toString()
+            ));
+        }
+        return builder.build();
     }
 }

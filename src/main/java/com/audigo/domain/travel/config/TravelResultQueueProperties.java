@@ -7,7 +7,8 @@ public record TravelResultQueueProperties(
         int waitTimeSeconds,
         int maxMessages,
         int concurrency,
-        int executorQueueCapacity
+        int executorQueueCapacity,
+        int maxReceiveCount
 ) {
 
     public TravelResultQueueProperties {
@@ -15,6 +16,7 @@ public record TravelResultQueueProperties(
         requireRange(maxMessages, 1, 10, "Result Queue 배치 크기");
         requireRange(concurrency, 1, 20, "Result Queue 처리 동시성");
         requireRange(executorQueueCapacity, 1, 1000, "Result Queue 실행 대기열 크기");
+        requireRange(maxReceiveCount, 1, 100, "Result Queue 최대 수신 횟수");
     }
 
     private static void requireRange(int value, int min, int max, String name) {

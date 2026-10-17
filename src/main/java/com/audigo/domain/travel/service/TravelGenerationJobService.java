@@ -221,13 +221,20 @@ public class TravelGenerationJobService {
     }
 
     @Transactional
+    public void markFailedIfPresent(Long jobId, String message) {
+        jobRepository.findByIdForUpdate(jobId)
+                .filter(job -> job.getStatus() == TravelPlanStatus.GENERATING)
+                .ifPresent(job -> markFailed(job, message));
+    }
+
+    @Transactional
     public int failStaleGeneratingJobs(Duration timeout) {
         if (timeout == null || timeout.isNegative() || timeout.isZero()) {
             return 0;
         }
         LocalDateTime cutoff = LocalDateTime.now().minus(timeout);
-        List<TravelGenerationJob> jobs = jobRepository.findByStatusAndStartedAtBefore(
-                TravelPlanStatus.GENERATING,
+        List<TravelGenerationJob> jobs = jobRepository.findByExecutionStatusAndStartedAtBefore(
+                TravelGenerationExecutionStatus.PROCESSING,
                 cutoff
         );
         jobs.forEach(job -> markFailed(

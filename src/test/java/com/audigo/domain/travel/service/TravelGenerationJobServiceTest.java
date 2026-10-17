@@ -148,15 +148,19 @@ class TravelGenerationJobServiceTest {
     }
 
     @Test
-    void 제한시간을_넘은_GENERATING_작업은_실패시키고_알림을_보낸다() {
-        when(jobRepository.findByStatusAndStartedAtBefore(
-                org.mockito.Mockito.eq(TravelPlanStatus.GENERATING),
+    void 제한시간을_넘은_PROCESSING_작업은_실패시키고_알림을_보낸다() {
+        when(jobRepository.findByExecutionStatusAndStartedAtBefore(
+                org.mockito.Mockito.eq(TravelGenerationExecutionStatus.PROCESSING),
                 org.mockito.Mockito.any(LocalDateTime.class)
         )).thenReturn(List.of(job));
 
         int count = service.failStaleGeneratingJobs(Duration.ofMinutes(5));
 
         assertThat(count).isEqualTo(1);
+        verify(jobRepository).findByExecutionStatusAndStartedAtBefore(
+                org.mockito.Mockito.eq(TravelGenerationExecutionStatus.PROCESSING),
+                org.mockito.Mockito.any(LocalDateTime.class)
+        );
         verify(job).fail("AI 서버 응답이 지연되어 여행 일정 생성에 실패했습니다.");
         verify(plan).markFailed();
         verify(jobRepository).save(job);
