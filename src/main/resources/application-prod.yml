@@ -14,6 +14,11 @@ spring:
     hibernate:
       ddl-auto: validate
 
+  # 기동 시 data.sql을 실행하지 않는다. 지역 seed는 운영 DB에 이미 있고 DMS로 복제된다
+  sql:
+    init:
+      mode: never
+
 audigo:
   cors:
     allowed-origins: ${AUDIGO_CORS_ALLOWED_ORIGINS}
