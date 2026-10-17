@@ -58,5 +58,24 @@
     "port": 3306,
     "user": "admin",
     "password_env": "SOURCE_MYSQL_PASSWORD"
+  },
+  "cdc_marker": {
+    "table": "audigo.cutover_marker",
+    "timeout_seconds": 30,
+    "source": {
+      "host": "10.0.3.20",
+      "port": 3306,
+      "user": "audigo_app",
+      "password_env": "SOURCE_MARKER_PASSWORD",
+      "options": [
+        "--ssl-mode=REQUIRED"
+      ]
+    },
+    "target": {
+      "host": "audigo.xxxxxxxx.ap-northeast-2.rds.amazonaws.com",
+      "port": 3306,
+      "user": "audigo_app",
+      "password_env": "TARGET_MARKER_PASSWORD"
+    }
   }
 }

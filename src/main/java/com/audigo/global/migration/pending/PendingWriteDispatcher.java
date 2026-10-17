@@ -18,6 +18,7 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -40,6 +41,8 @@ public class PendingWriteDispatcher {
     private final Semaphore permits;
     private final ExecutorService loop;
     private final AtomicBoolean running = new AtomicBoolean();
+    // 재개 직전 커넥션 풀 교체. 인자는 로그용 사유
+    private final Consumer<String> poolRefresher;
 
     private final AtomicLong dispatched = new AtomicLong();
     private final AtomicLong succeeded = new AtomicLong();
@@ -54,13 +57,35 @@ public class PendingWriteDispatcher {
         this(gate, queue, properties, Clock.systemUTC());
     }
 
-    @Autowired
     public PendingWriteDispatcher(
             MigrationWriteGate gate,
             PendingWriteQueue queue,
             MigrationProperties properties,
             Clock clock
     ) {
+        this(gate, queue, properties, clock, reason -> {
+        });
+    }
+
+    @Autowired
+    public PendingWriteDispatcher(
+            MigrationWriteGate gate,
+            PendingWriteQueue queue,
+            MigrationProperties properties,
+            Clock clock,
+            ConnectionPoolRefresher connectionPoolRefresher
+    ) {
+        this(gate, queue, properties, clock, connectionPoolRefresher::refresh);
+    }
+
+    PendingWriteDispatcher(
+            MigrationWriteGate gate,
+            PendingWriteQueue queue,
+            MigrationProperties properties,
+            Clock clock,
+            Consumer<String> poolRefresher
+    ) {
+        this.poolRefresher = Objects.requireNonNull(poolRefresher, "poolRefresher");
         this.gate = Objects.requireNonNull(gate, "gate");
         this.queue = Objects.requireNonNull(queue, "queue");
         this.clock = Objects.requireNonNull(clock, "clock");
@@ -73,14 +98,26 @@ public class PendingWriteDispatcher {
         });
     }
 
-    // 재개 명령 진입점. Gate가 RESUMING이면 재개 루프를 시작한다.
+    // 재개 명령 진입점. Gate가 RESUMING이면 커넥션 풀을 교체한 뒤 재개 루프를 시작한다.
+    // 풀 교체가 먼저여야 재개되는 쓰기가 이전 목적지(원본)에 묶인 커넥션을 쓰지 않는다.
     // 같은 명령이 다시 와도 Gate가 멱등 처리하고 루프는 하나만 돈다
     public TransitionResult resume(PhaseCommand command, ResumeTarget target) {
         TransitionResult result = gate.resume(command, target);
         if (result.isSuccess() && result.snapshot().phase() == WritePhase.RESUMING) {
+            refreshConnectionPool(target);
             start();
         }
         return result;
+    }
+
+    // 실패해도 재개는 진행한다. 남은 이전 커넥션은 원본 super_read_only 또는 ProxySQL이 막는다
+    private void refreshConnectionPool(ResumeTarget target) {
+        try {
+            poolRefresher.accept("resume target=" + target);
+        } catch (RuntimeException exception) {
+            log.error("migration_connection_pool_refresh_failed target={}", target, exception);
+            gate.reportError("migration_connection_pool_refresh_failed", "target=" + target + " " + exception);
+        }
     }
 
     // 루프가 이미 돌고 있으면 false
