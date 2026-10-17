@@ -88,6 +88,12 @@ audigo:
     job-queue-url: ${AUDIGO_AI_JOB_QUEUE_URL:}
     result-queue-url: ${AUDIGO_AI_RESULT_QUEUE_URL:}
     endpoint: ${AUDIGO_SQS_ENDPOINT:}
+    outbox:
+      publisher-delay-millis: ${AUDIGO_SQS_OUTBOX_PUBLISHER_DELAY_MILLIS:1000}
+      batch-size: ${AUDIGO_SQS_OUTBOX_BATCH_SIZE:10}
+      retry-base-delay-seconds: ${AUDIGO_SQS_OUTBOX_RETRY_BASE_DELAY_SECONDS:5}
+      retry-max-delay-seconds: ${AUDIGO_SQS_OUTBOX_RETRY_MAX_DELAY_SECONDS:300}
+      processing-lease-seconds: ${AUDIGO_SQS_OUTBOX_PROCESSING_LEASE_SECONDS:120}
 
 sentry:
   dsn: ${SENTRY_DSN:}
