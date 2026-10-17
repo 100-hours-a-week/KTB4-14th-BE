@@ -1,6 +1,7 @@
 package com.audigo.domain.travel.service;
 
 import com.audigo.domain.travel.dto.AiTravelGenerationRequest;
+import com.audigo.global.migration.ai.AiJobTicketRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Async;
@@ -15,23 +16,37 @@ public class TravelGenerationWorker {
     private final AiGenerationClient aiGenerationClient;
     private final TravelGenerationJobService jobService;
     private final TravelGenerationContextStore contextStore;
+    private final AiJobTicketRegistry ticketRegistry;
 
     public TravelGenerationWorker(
             AiGenerationClient aiGenerationClient,
             TravelGenerationJobService jobService,
-            TravelGenerationContextStore contextStore
+            TravelGenerationContextStore contextStore,
+            AiJobTicketRegistry ticketRegistry
     ) {
         this.aiGenerationClient = aiGenerationClient;
         this.jobService = jobService;
         this.contextStore = contextStore;
+        this.ticketRegistry = ticketRegistry;
     }
 
+    // finishStream·markFailed는 @Transactional public 메서드라 반환 시점에 커밋이 끝난다.
+    // 따라서 finally 도달 = 마지막 저장 완료이며, 이때 AI_JOB 티켓을 닫는다
     @Async("travelGenerationExecutor")
     public void run(Long jobId) {
         try {
+            generate(jobId);
+        } finally {
+            contextStore.remove(jobId);
+            ticketRegistry.close(jobId);
+        }
+    }
+
+    private void generate(Long jobId) {
+        try {
             AiTravelGenerationRequest request = contextStore.get(jobId);
             if (request == null) {
-                jobService.markFailed(jobId, "여행 생성에 필요한 요청 정보가 없습니다.");
+                markFailed(jobId, "여행 생성에 필요한 요청 정보가 없습니다.");
                 return;
             }
             jobService.markStarted(jobId);
@@ -46,9 +61,16 @@ public class TravelGenerationWorker {
             jobService.finishStream(jobId);
         } catch (RuntimeException exception) {
             log.warn("AI 생성 작업에 실패했습니다. jobId={}", jobId, exception);
-            jobService.markFailed(jobId, "AI 서버와 통신하는 중 오류가 발생했습니다.");
-        } finally {
-            contextStore.remove(jobId);
+            markFailed(jobId, "AI 서버와 통신하는 중 오류가 발생했습니다.");
+        }
+    }
+
+    // 실패 저장마저 실패하면 job이 GENERATING으로 남는다. 다음 OPEN 이후 watchdog이 실패 처리한다
+    private void markFailed(Long jobId, String message) {
+        try {
+            jobService.markFailed(jobId, message);
+        } catch (RuntimeException exception) {
+            log.error("migration_ai_job_final_save_failed job_id={}", jobId, exception);
         }
     }
 }

@@ -1,5 +1,6 @@
 package com.audigo.global.migration.gate;
 
+import com.audigo.global.migration.ai.DeferredAiJobStats;
 import com.audigo.global.migration.tracking.WorkType;
 import java.time.Duration;
 import java.time.Instant;
@@ -18,7 +19,8 @@ public record GateSnapshot(
         Instant drainStartedAt,
         Instant frozenAt,
         Instant resumeStartedAt,
-        Instant openedAt
+        Instant openedAt,
+        DeferredAiJobStats deferredAiJobs
 ) {
 
     public GateSnapshot {
