@@ -35,6 +35,16 @@ public class TravelGenerationV2Service {
     @Transactional
     public TravelPlanCreatedResponse create(Long userId, TravelPlanRequest request) {
         TravelGenerationJob job = travelPlanService.createTravelPlanWithGenerationJob(userId, request);
+        return enqueue(job, request);
+    }
+
+    @Transactional
+    public TravelPlanCreatedResponse regenerate(Long userId, Long travelPlanId, TravelPlanRequest request) {
+        TravelGenerationJob job = travelPlanService.regenerateTravelPlanWithGenerationJob(userId, travelPlanId);
+        return enqueue(job, request);
+    }
+
+    private TravelPlanCreatedResponse enqueue(TravelGenerationJob job, TravelPlanRequest request) {
         TravelPlan travelPlan = job.getTravelPlan();
         AiTravelGenerationRequest aiRequest = requestFactory.from(travelPlan, request);
 

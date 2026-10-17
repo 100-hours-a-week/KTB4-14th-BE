@@ -154,16 +154,20 @@ public class TravelPlanService {
 
     @Transactional
     public TravelPlan regenerateTravelPlan(Long userId, Long travelPlanId) {
+        return regenerateTravelPlanWithGenerationJob(userId, travelPlanId).getTravelPlan();
+    }
+
+    @Transactional
+    public TravelGenerationJob regenerateTravelPlanWithGenerationJob(Long userId, Long travelPlanId) {
         TravelPlan travelPlan = travelPlanRepository.findByIdAndUserId(travelPlanId, userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.VALIDATION_FAILED));
         travelGenerationJobRepository.findTopByTravelPlanIdOrderByIdDesc(travelPlanId)
-                .filter(job -> job.getStatus() == com.audigo.domain.travel.entity.TravelPlanStatus.GENERATING)
+                .filter(job -> job.getStatus() == TravelPlanStatus.GENERATING)
                 .ifPresent(job -> {
                     throw new BusinessException(ErrorCode.VALIDATION_FAILED);
                 });
         travelPlan.restartGeneration();
-        travelGenerationJobRepository.save(com.audigo.domain.travel.entity.TravelGenerationJob.create(travelPlan));
-        return travelPlan;
+        return travelGenerationJobRepository.save(TravelGenerationJob.create(travelPlan));
     }
 
     private void addRequiredPlaces(TravelPlan travelPlan, List<RequiredPlaceRequest> requests) {

@@ -581,6 +581,13 @@ ALLOW_WRITE_TESTS=true \
 CONFIRM_AI_MOCK=true \
 ./scripts/test/run-k6.sh scenarios/p01/ramping-vus.js
 
+# v2 SQS 생성 경로 검증: 생성 API만 v2로 변경하고 상태·일정 조회 계약은 유지
+CONFIRM_STAGING=true \
+ALLOW_WRITE_TESTS=true \
+CONFIRM_AI_MOCK=true \
+P01_CREATION_PATH=/api/v2/travel-plans \
+./scripts/test/run-k6.sh scenarios/p01/ramping-vus.js
+
 # P-01 알림 전달 검증: 사용자별 SSE 연결 → 같은 사용자의 여행 생성 → notification 수신
 CONFIRM_STAGING=true \
 ALLOW_WRITE_TESTS=true \
@@ -611,7 +618,7 @@ CONFIRM_COMPLETION_RESET=true \
 | --- | --- | --- |
 | P-01 `constant-arrival-rate`, `P01_CREATION_RATE_PER_HOUR` | 6 생성/시간 | 일정한 생성 시작률의 Backend·DB 처리량을 본다. VU는 고정 사용자를 순차 재사용한다. |
 | P-01 `ramping-arrival-rate`, `P01_RAMP_*_RATE_PER_HOUR` | 6 → 12 → 30 → 60 → 6 | 여행일 전 증가·집중 패턴을 본다. stage 시간은 `P01_RAMP_*_DURATION`이고 VU는 고정 사용자를 순차 재사용한다. |
-| P-01 `ramping-vus`, `P01_RAMP_VU_*` | 1 → 3 → 10 → 0 VU | VU별 고정 사용자가 `지역 → 생성 → 폴링 → 일정` 전체 흐름을 완료할 때마다 반복한다. 최대 동시 VU는 150명이다. |
+| P-01 `ramping-vus`, `P01_RAMP_VU_*` | 1 → 3 → 10 → 0 VU | VU별 고정 사용자가 `지역 → 생성 → 폴링 → 일정` 전체 흐름을 완료할 때마다 반복한다. `P01_CREATION_PATH`로 v1(기본값) 또는 v2 SQS 생성 API를 선택하며, 최대 동시 VU는 150명이다. |
 | P-01 알림 전달, `per-vu-iterations` 2개 | 사용자 1명 × SSE 1회·생성 1회 | SSE 연결을 먼저 열고 `P01_NOTIFICATION_SSE_READY_DELAY`(기본 5초) 뒤 같은 사용자가 여행을 생성한다. `P01_NOTIFICATION_USERS`는 최대 150명이다. |
 | P-02 고정 | 13 읽기 flow/min, 5 완료 flow/min, SSE 10 | 기존 혼합 프로파일이다. `P02_DURATION`이 공통 시간이다. |
 | P-02 Ramp | 읽기 13→26→52→100→13, 완료 1→2→5→10→1, SSE 10 | 여행 당일 스파이크용이다. 읽기 `P02_ITINERARY_RAMP_*_DURATION`과 완료 `P02_COMPLETION_RAMP_*_DURATION`은 독립 설정하되 총합이 같아야 하며, SSE 시간은 그 합계로 자동 계산된다. |

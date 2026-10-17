@@ -66,6 +66,37 @@ class TravelGenerationV2ServiceTest {
         assertThat(messageCaptor.getValue().request()).isEqualTo(aiRequest);
     }
 
+    @Test
+    void 재생성도_내부_worker가_아닌_Outbox로_접수한다() {
+        TravelPlan travelPlan = mock(TravelPlan.class);
+        TravelGenerationJob job = mock(TravelGenerationJob.class);
+        AiTravelGenerationRequest aiRequest = aiRequest();
+        when(travelPlanService.regenerateTravelPlanWithGenerationJob(1L, 10L)).thenReturn(job);
+        when(job.getTravelPlan()).thenReturn(travelPlan);
+        when(job.getId()).thenReturn(42L);
+        when(travelPlan.getId()).thenReturn(10L);
+        when(travelPlan.getStatus()).thenReturn(TravelPlanStatus.GENERATING);
+        when(requestFactory.from(travelPlan, null)).thenReturn(aiRequest);
+        TravelGenerationV2Service service = new TravelGenerationV2Service(
+                travelPlanService,
+                requestFactory,
+                payloadStore,
+                progressStore,
+                outboxStore
+        );
+
+        var response = service.regenerate(1L, 10L, null);
+
+        assertThat(response.travelPlanId()).isEqualTo(10L);
+        assertThat(response.generationJobId()).isEqualTo(42L);
+        verify(payloadStore).saveRequest(42L, aiRequest);
+        verify(progressStore).initialize(42L);
+        ArgumentCaptor<TravelGenerationJobMessage> messageCaptor =
+                ArgumentCaptor.forClass(TravelGenerationJobMessage.class);
+        verify(outboxStore).enqueue(org.mockito.ArgumentMatchers.eq(job), messageCaptor.capture());
+        assertThat(messageCaptor.getValue().generationJobId()).isEqualTo(42L);
+    }
+
     private AiTravelGenerationRequest aiRequest() {
         return new AiTravelGenerationRequest(
                 10L,

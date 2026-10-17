@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import com.audigo.domain.travel.dto.TravelPlanRequest;
 import com.audigo.domain.travel.dto.TravelPreferenceRequest;
+import com.audigo.domain.travel.entity.TravelGenerationJob;
 import com.audigo.domain.travel.entity.BudgetType;
 import com.audigo.domain.travel.entity.CompanionType;
 import com.audigo.domain.travel.entity.FoodType;
@@ -29,6 +30,7 @@ import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -179,6 +181,25 @@ class TravelPlanServiceTest {
                 );
 
         assertThat(travelPlan.isConfirmed()).isFalse();
+    }
+
+    @Test
+    void 재생성할_때_새_작업을_반환한다() {
+        TravelPlan travelPlan = travelPlan();
+        travelPlan.markCompleted();
+        when(travelPlanRepository.findByIdAndUserId(10L, 1L)).thenReturn(Optional.of(travelPlan));
+        when(travelGenerationJobRepository.findTopByTravelPlanIdOrderByIdDesc(10L))
+                .thenReturn(Optional.empty());
+        when(travelGenerationJobRepository.save(any(TravelGenerationJob.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        TravelGenerationJob job = travelPlanService.regenerateTravelPlanWithGenerationJob(1L, 10L);
+
+        assertThat(job.getTravelPlan()).isSameAs(travelPlan);
+        assertThat(travelPlan.getStatus()).isEqualTo(TravelPlanStatus.GENERATING);
+        ArgumentCaptor<TravelGenerationJob> captor = ArgumentCaptor.forClass(TravelGenerationJob.class);
+        verify(travelGenerationJobRepository).save(captor.capture());
+        assertThat(captor.getValue()).isSameAs(job);
     }
 
     private TravelPlanRequest validRequest() {
