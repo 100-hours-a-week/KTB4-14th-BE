@@ -50,12 +50,12 @@ public class PendingWriteDispatcher {
     private volatile Instant startedAt;
     private volatile Instant completedAt;
 
-    @Autowired
     public PendingWriteDispatcher(MigrationWriteGate gate, PendingWriteQueue queue, MigrationProperties properties) {
         this(gate, queue, properties, Clock.systemUTC());
     }
 
-    PendingWriteDispatcher(
+    @Autowired
+    public PendingWriteDispatcher(
             MigrationWriteGate gate,
             PendingWriteQueue queue,
             MigrationProperties properties,
@@ -157,7 +157,7 @@ public class PendingWriteDispatcher {
         long waited = Duration.between(pending.enqueuedAt(), clock.instant()).toMillis();
         maxWaitMillis.accumulateAndGet(waited, Math::max);
         dispatched.incrementAndGet();
-        pending.onFinish(this::onFinished);
+        pending.onFinish(status -> onFinished(pending, status));
         try {
             AsyncContext asyncContext = pending.asyncContext();
             asyncContext.getRequest().setAttribute(MigrationWriteGateInterceptor.RELEASED_ATTR, pending);
@@ -171,12 +171,14 @@ public class PendingWriteDispatcher {
         }
     }
 
-    private void onFinished(int status) {
+    private void onFinished(PendingWrite pending, int status) {
         try {
             if (status > 0 && status < 400) {
                 succeeded.incrementAndGet();
             } else {
                 failed.incrementAndGet();
+                gate.reportError("migration_resume_failed_response", "status=" + status + " "
+                        + pending.method() + " " + pending.uri() + " request_id=" + pending.requestId());
             }
         } finally {
             permits.release();

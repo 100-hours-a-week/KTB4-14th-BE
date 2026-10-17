@@ -66,6 +66,7 @@ public class TravelGenerationLauncher {
             jobService.restartClock(jobId);
         } catch (RuntimeException exception) {
             log.error("migration_deferred_ai_job_start_failed job_id={} reason=restart_clock", jobId, exception);
+            gate.reportError("migration_deferred_ai_job_start_failed", "job_id=" + jobId + " reason=restart_clock");
             job.ticket().close();
             abandon(jobId, "AI 생성 작업을 시작하지 못했습니다.");
             return;
@@ -76,6 +77,7 @@ public class TravelGenerationLauncher {
                     jobId, Duration.between(job.deferredAt(), now).toMillis());
         } catch (RuntimeException exception) {
             log.error("migration_deferred_ai_job_start_failed job_id={} reason=submit", jobId, exception);
+            gate.reportError("migration_deferred_ai_job_start_failed", "job_id=" + jobId + " reason=submit");
             abandon(jobId, "AI 생성 작업을 시작하지 못했습니다.");
         }
     }
@@ -98,6 +100,7 @@ public class TravelGenerationLauncher {
             jobService.markFailed(jobId, message);
         } catch (RuntimeException exception) {
             log.error("migration_ai_job_final_save_failed job_id={}", jobId, exception);
+            gate.reportError("migration_ai_job_final_save_failed", "job_id=" + jobId);
         }
     }
 
