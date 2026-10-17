@@ -85,6 +85,8 @@ class Recorder:
             "durations_ms": {
                 "ai_wait": self.between("defer_ai_start", "ai_drained"),
                 "drain": self.between("drain", "frozen"),
+                "cdc_catchup": self.between("cdc_marker_written", "cdc_caught_up"),
+                "dms_verify": self.between("dms_verify", "dms_verified"),
                 "write_stop": self.between("frozen", "resume_sent"),
                 "resume_to_open": self.between("resume_sent", "opened"),
             },
@@ -137,8 +139,9 @@ def mysql_query(conn, sql):
     """mysql CLI로 실행하고 탭 구분 행 목록을 돌려준다. 비밀번호는 MYSQL_PWD로 전달한다"""
     password = os.environ.get(conn["password_env"], "")
     output = run(
-        MYSQL_COMMAND + ["-h", conn["host"], "-P", str(conn["port"]), "-u", conn["user"],
-         "--batch", "--skip-column-names", "--connect-timeout=5", "-e", sql],
+        MYSQL_COMMAND + ["-h", conn["host"], "-P", str(conn["port"]), "-u", conn["user"]]
+        + list(conn.get("options", []))
+        + ["--batch", "--skip-column-names", "--connect-timeout=5", "-e", sql],
         env_extra={"MYSQL_PWD": password},
     )
     return [line.split("\t") for line in output.splitlines() if line.strip()]
@@ -214,6 +217,7 @@ class Cutover:
         self.source_read_only_set = False
         self.dms_stopped = False
         self.rds_writes_allowed = False
+        self.marker_id = None
 
     # ---- 전체 흐름
 
@@ -224,7 +228,9 @@ class Cutover:
             self.wait_ai_jobs()
             self.drain()
             self.freeze()
+            self.write_cdc_marker()
             self.block_source_writes()
+            self.wait_cdc_marker()
             self.verify_dms()
             self.stop_dms()
             self.switch_proxysql()
@@ -244,6 +250,7 @@ class Cutover:
         # 여기부터는 RDS 쓰기 허용. 실패해도 취소하지 않는다
         self.resume_rds()
         self.wait_open()
+        self.retire_source()
         self.report()
         return True
 
@@ -265,8 +272,11 @@ class Cutover:
                 problems.append("{}: migration_enabled=false".format(instance))
             if status["phase"] != "OPEN" or status["deferred_ai_jobs"]["enabled"]:
                 problems.append("{}: 이미 컷오버가 진행 중이다 (phase={})".format(instance, status["phase"]))
-        self.preflight_dms(problems)
-        self.preflight_proxysql(problems)
+        for check in (self.preflight_dms, self.preflight_proxysql, self.preflight_cdc_marker):
+            try:
+                check(problems)
+            except (Exception, SystemExit) as error:  # noqa: BLE001 - 접속 실패도 점검 실패로 모은다
+                problems.append("{} 실패: {}".format(check.__name__, error))
         if problems:
             for problem in problems:
                 self.rec.log(problem, "ERROR")
@@ -284,6 +294,18 @@ class Cutover:
             task.get("Status"), task.get("ReplicationTaskStats", {}).get("FullLoadProgressPercent")))
         if task.get("Status") != "running":
             problems.append("DMS task가 running이 아니다: {}".format(task.get("Status")))
+
+    def preflight_cdc_marker(self, problems):
+        marker = self.config.get("cdc_marker")
+        if not marker:
+            self.rec.log("CDC 마커 설정 없음: 마지막 변경 반영 확인을 DMS 검증에만 의존한다", "WARN")
+            return
+        for side in ("source", "target"):
+            try:
+                mysql_query(marker[side], "SELECT COUNT(*) FROM {}".format(marker["table"]))
+            except Exception as error:  # noqa: BLE001
+                problems.append("CDC 마커 테이블 {}을 {}에서 읽을 수 없다: {}".format(marker["table"], side, error))
+        self.rec.log("CDC 마커 테이블 확인: {}".format(marker["table"]))
 
     def preflight_proxysql(self, problems):
         proxysql = self.config.get("proxysql")
@@ -340,6 +362,41 @@ class Cutover:
                 raise CutoverAbort("freeze 시간 초과. 잔여 작업이 남은 인스턴스: {}".format(pending))
         self.rec.mark("frozen")
 
+    def write_cdc_marker(self):
+        """freeze로 앱 쓰기가 멈춘 뒤 원본에 마커를 쓴다. DMS는 binlog 순서대로 반영하므로
+        이 행이 RDS에 보이면 그 전의 모든 변경도 반영된 것이다. super_read_only를 걸기 전에 쓴다"""
+        marker = self.config.get("cdc_marker")
+        if not marker:
+            return
+        self.marker_id = "{}-{}-{}".format(self.migration_id, self.epoch, int(time.time() * 1000)).replace("'", "")
+        sql = "INSERT INTO {} (id, created_at) VALUES ('{}', NOW(6))".format(marker["table"], self.marker_id)
+        self.step("CDC 마커 기록 (원본): {}".format(self.marker_id), lambda: mysql_query(marker["source"], sql))
+        self.rec.mark("cdc_marker_written")
+
+    def wait_cdc_marker(self):
+        marker = self.config.get("cdc_marker")
+        if not marker:
+            return
+        if self.dry_run:
+            self.rec.log("[dry-run] 대기: CDC 마커가 RDS에 도착")
+            return
+        sql = "SELECT COUNT(*) FROM {} WHERE id = '{}'".format(marker["table"], self.marker_id)
+        deadline = time.monotonic() + marker.get("timeout_seconds", 30)
+        while True:
+            try:
+                arrived = int(mysql_query(marker["target"], sql)[0][0]) > 0
+            except Exception as error:  # noqa: BLE001 - 일시적 접속 오류는 재시도한다
+                self.rec.log("RDS 마커 조회 실패, 재시도: {}".format(error), "WARN")
+                arrived = False
+            if arrived:
+                self.rec.mark("cdc_caught_up")
+                self.rec.log("CDC 마커 RDS 도착: 마지막 변경까지 반영됨 ({} ms)".format(
+                    self.rec.between("cdc_marker_written", "cdc_caught_up")))
+                return
+            if time.monotonic() > deadline:
+                raise CutoverAbort("CDC 마커가 {}초 안에 RDS에 도착하지 않았다".format(marker.get("timeout_seconds", 30)))
+            time.sleep(0.5)
+
     def block_source_writes(self):
         source_mysql = self.config.get("source_mysql")
         if not source_mysql or not source_mysql.get("set_super_read_only"):
@@ -354,11 +411,21 @@ class Cutover:
         if not dms:
             return
         self.rec.mark("dms_verify")
+        if self.dry_run:
+            # 실제 컷오버는 freeze 이후라 Pending이 줄어들지만, dry-run은 쓰기가 계속되므로 현재 상태만 보여준다
+            problems = dms_validation_problems(dms)
+            self.rec.log("[dry-run] DMS 검증 현재 상태: {}".format(
+                "통과 조건 충족" if not problems else "미충족 {}건 (예: {})".format(len(problems), problems[:3])))
+            return
         deadline = time.monotonic() + self.timeouts.get("dms_verify_seconds", 60)
         while True:
             problems = dms_validation_problems(dms)
             if not problems:
+                if "Not enabled" in dms.get("accepted_validation_states", []):
+                    self.rec.log("DMS 데이터 검증 없이 통과시켰다 (accepted_validation_states에 Not enabled). "
+                                 "운영 컷오버에서는 검증을 켠다", "WARN")
                 self.rec.log("DMS 테이블 검증 통과")
+                self.rec.mark("dms_verified")
                 return
             if time.monotonic() > deadline:
                 for problem in problems[:20]:
@@ -387,9 +454,9 @@ class Cutover:
         if not proxysql:
             return
         target = proxysql["target"]
-        sql = proxysql_switch_sql(proxysql["hostgroups"], target)
-        self.step("ProxySQL 목적지 → {}:{}".format(target["host"], target["port"]),
-                  lambda: mysql_query(proxysql["admin"], sql))
+        sql = proxysql_soft_switch_sql(proxysql["hostgroups"], proxysql["source"], target)
+        self.step("ProxySQL 목적지 → {}:{} (원본은 OFFLINE_SOFT: 진행 중 연결은 끊지 않음)".format(
+            target["host"], target["port"]), lambda: mysql_query(proxysql["admin"], sql))
         self.proxysql_switched = True
         self.rec.mark("proxysql_switched")
 
@@ -397,19 +464,19 @@ class Cutover:
         proxysql = self.config.get("proxysql")
         if not proxysql or self.dry_run:
             return
-        target, source = proxysql["target"], proxysql["source"]
+        target = proxysql["target"]
         target_key = (target["host"], str(target["port"]))
         rows = mysql_query(proxysql["admin"],
                            "SELECT hostgroup_id, hostname, port, status FROM runtime_mysql_servers")
         servers = {(row[1], row[2]): row[3] for row in rows if int(row[0]) in proxysql["hostgroups"]}
         if servers.get(target_key) != "ONLINE":
             raise CutoverAbort("ProxySQL runtime에 RDS가 ONLINE으로 없다: {}".format(servers))
-        # 옛 서버는 사용 중인 연결이 남아 있는 동안 OFFLINE_HARD로 남는다. 새 쿼리는 받지 않으므로 정상이다
+        # 원본은 OFFLINE_SOFT로 남는다. 새 세션은 받지 않고, 이미 묶인 세션만 반납될 때까지 쓴다.
+        # 그 세션은 앱이 resume 직전에 커넥션 풀을 교체하면서 정리된다
         unexpected = {key: status for key, status in servers.items()
-                      if key != target_key and status != "OFFLINE_HARD"}
+                      if key != target_key and status not in ("OFFLINE_SOFT", "OFFLINE_HARD")}
         if unexpected:
-            raise CutoverAbort("RDS 외 서버가 아직 트래픽을 받을 수 있다: {}".format(unexpected))
-        self.wait_source_connections(proxysql, source)
+            raise CutoverAbort("RDS 외 서버가 아직 새 트래픽을 받을 수 있다: {}".format(unexpected))
         # 앱 계정으로 ProxySQL을 거친 실제 목적지 확인
         route = proxysql.get("route_check")
         if route:
@@ -419,22 +486,36 @@ class Cutover:
                 raise CutoverAbort("ProxySQL 경유 목적지 확인 실패: {} (기대값 {})".format(actual, expected))
         self.rec.log("ProxySQL 경로 확인 완료")
 
-    def wait_source_connections(self, proxysql, source):
-        """옛 서버에 묶인 연결이 0이 될 때까지 잠시 기다린다.
-        FROZEN이라 쓰기 트랜잭션은 0이고, 옛 서버는 OFFLINE_HARD라 새 쿼리를 받지 않으므로
-        남아 있어도 원본 쓰기 위험은 없다. 다만 앱이 그 연결을 재사용하면 한 번 실패하므로 경고한다"""
+    def retire_source(self):
+        """OPEN 이후 원본에 묶인 연결이 모두 반납되면 ProxySQL에서 원본 항목을 지운다.
+        앱이 resume 직전에 커넥션 풀을 교체하므로 보통 바로 0이 된다"""
+        proxysql = self.config.get("proxysql")
+        if not proxysql or not self.proxysql_switched:
+            return
+        source = proxysql["source"]
+        if self.dry_run:
+            self.rec.log("[dry-run] 원본 연결 0 확인 후 ProxySQL에서 원본 항목 삭제")
+            return
         sql = ("SELECT COALESCE(SUM(ConnUsed),0) FROM stats_mysql_connection_pool "
                "WHERE srv_host='{}' AND srv_port={}".format(source["host"], int(source["port"])))
-        deadline = time.monotonic() + self.timeouts.get("source_connection_wait_seconds", 5)
+        deadline = time.monotonic() + self.timeouts.get("source_drain_seconds", 30)
         while True:
             used = int(mysql_query(proxysql["admin"], sql)[0][0])
             if used == 0:
-                return
+                break
             if time.monotonic() > deadline:
-                self.rec.log("원본에 묶인 연결 {}개가 남았다 (OFFLINE_HARD라 원본 쓰기는 불가). "
-                             "앱이 재사용하면 해당 요청이 연결 오류로 실패할 수 있다".format(used), "WARN")
+                self.rec.log("원본에 묶인 연결 {}개가 남아 원본 항목을 남겨 둔다(OFFLINE_SOFT). "
+                             "앱 커넥션 풀 교체 로그(migration_connection_pool_refreshed)를 확인하고, "
+                             "0이 되면 수동으로 지운다: {}".format(
+                                 used, proxysql_retire_source_sql(proxysql["hostgroups"], source)), "WARN")
                 return
             time.sleep(0.5)
+        try:
+            mysql_query(proxysql["admin"], proxysql_retire_source_sql(proxysql["hostgroups"], source))
+            self.rec.mark("source_retired")
+            self.rec.log("ProxySQL에서 원본 항목 삭제 완료")
+        except Exception as error:  # noqa: BLE001 - 정리 실패는 컷오버 결과에 영향이 없다
+            self.rec.log("원본 항목 삭제 실패, 수동 정리 필요: {}".format(error), "WARN")
 
     def resume_rds(self):
         self.rec.mark("resume_sent")
@@ -460,8 +541,9 @@ class Cutover:
         self.rec.mark("abort")
         proxysql = self.config.get("proxysql")
         if self.proxysql_switched and proxysql:
-            sql = proxysql_switch_sql(proxysql["hostgroups"], proxysql["source"])
-            self.step("ProxySQL 목적지 원복 → 원본", lambda: mysql_query(proxysql["admin"], sql))
+            sql = proxysql_revert_sql(proxysql["hostgroups"], proxysql["source"], proxysql["target"])
+            self.step("ProxySQL 목적지 원복 → 원본 (RDS 항목 삭제, 원본 ONLINE)",
+                      lambda: mysql_query(proxysql["admin"], sql))
         if self.source_read_only_set:
             self.step("원본 MySQL super_read_only=OFF",
                       lambda: mysql_query(self.config["source_mysql"], "SET GLOBAL super_read_only = OFF"))
@@ -602,8 +684,10 @@ def dms_validation_problems(dms):
     problems = []
     for table in stats:
         name = "{}.{}".format(table["SchemaName"], table["TableName"])
-        if table.get("ValidationState") not in allowed:
-            problems.append("{} ValidationState={}".format(name, table.get("ValidationState")))
+        # 검증이 꺼진 태스크는 ValidationState가 비어 있다. accepted_validation_states에 "Not enabled"를 넣어야 통과한다
+        state = table.get("ValidationState") or "Not enabled"
+        if state not in allowed:
+            problems.append("{} ValidationState={}".format(name, state))
         for field in ("ValidationFailedRecords", "ValidationPendingRecords", "ValidationSuspendedRecords"):
             if table.get(field, 0):
                 problems.append("{} {}={}".format(name, field, table[field]))
@@ -613,11 +697,44 @@ def dms_validation_problems(dms):
     return problems
 
 
-def proxysql_switch_sql(hostgroups, destination):
-    ids = ",".join(str(group) for group in hostgroups)
-    return ("UPDATE mysql_servers SET hostname='{host}', port={port} WHERE hostgroup_id IN ({ids}); "
-            "LOAD MYSQL SERVERS TO RUNTIME; SAVE MYSQL SERVERS TO DISK;").format(
-        host=destination["host"], port=int(destination["port"]), ids=ids)
+SERVER_COLUMNS = "weight, compression, max_connections, max_replication_lag, use_ssl, max_latency_ms"
+
+
+def proxysql_soft_switch_sql(hostgroups, source, target):
+    """RDS 항목을 원본 설정(use_ssl 등)을 복사해 추가하고 원본은 OFFLINE_SOFT로 바꾼다.
+    OFFLINE_SOFT는 새 세션을 받지 않지만 이미 묶인 세션은 끊지 않으므로 진행 중인 읽기가 실패하지 않는다"""
+    ids = ",".join(str(int(group)) for group in hostgroups)
+    src_host, src_port = sql_text(source["host"]), int(source["port"])
+    tgt_host, tgt_port = sql_text(target["host"]), int(target["port"])
+    return (
+        "INSERT OR REPLACE INTO mysql_servers (hostgroup_id, hostname, port, status, {cols}) "
+        "SELECT hostgroup_id, '{th}', {tp}, 'ONLINE', {cols} FROM mysql_servers "
+        "WHERE hostgroup_id IN ({ids}) AND hostname='{sh}' AND port={sp}; "
+        "UPDATE mysql_servers SET status='OFFLINE_SOFT' WHERE hostgroup_id IN ({ids}) AND hostname='{sh}' AND port={sp}; "
+        "LOAD MYSQL SERVERS TO RUNTIME; SAVE MYSQL SERVERS TO DISK;"
+    ).format(cols=SERVER_COLUMNS, th=tgt_host, tp=tgt_port, sh=src_host, sp=src_port, ids=ids)
+
+
+def proxysql_revert_sql(hostgroups, source, target):
+    ids = ",".join(str(int(group)) for group in hostgroups)
+    return (
+        "DELETE FROM mysql_servers WHERE hostgroup_id IN ({ids}) AND hostname='{th}' AND port={tp}; "
+        "UPDATE mysql_servers SET status='ONLINE' WHERE hostgroup_id IN ({ids}) AND hostname='{sh}' AND port={sp}; "
+        "LOAD MYSQL SERVERS TO RUNTIME; SAVE MYSQL SERVERS TO DISK;"
+    ).format(ids=ids, th=sql_text(target["host"]), tp=int(target["port"]),
+             sh=sql_text(source["host"]), sp=int(source["port"]))
+
+
+def proxysql_retire_source_sql(hostgroups, source):
+    ids = ",".join(str(int(group)) for group in hostgroups)
+    return (
+        "DELETE FROM mysql_servers WHERE hostgroup_id IN ({ids}) AND hostname='{sh}' AND port={sp}; "
+        "LOAD MYSQL SERVERS TO RUNTIME; SAVE MYSQL SERVERS TO DISK;"
+    ).format(ids=ids, sh=sql_text(source["host"]), sp=int(source["port"]))
+
+
+def sql_text(value):
+    return str(value).replace("'", "''")
 
 
 # ---------------------------------------------------------------- 진입점
@@ -632,7 +749,12 @@ def main():
     args = parser.parse_args()
 
     with open(args.config, encoding="utf-8") as file:
-        config = json.load(file)
+        try:
+            config = json.load(file)
+        except json.JSONDecodeError as error:
+            raise SystemExit("설정 파일 JSON 문법 오류: {} {}번째 줄 {}번째 칸 근처. "
+                             "마지막 항목 뒤 쉼표, 주석(//, #), 따옴표 누락을 확인한다 ({})".format(
+                                 args.config, error.lineno, error.colno, error.msg))
     if config.get("mysql_command"):
         MYSQL_COMMAND[:] = config["mysql_command"]
     report_path = args.report or "cutover-{}-{}.json".format(config["migration_id"], config["epoch"])
