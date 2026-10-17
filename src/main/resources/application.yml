@@ -94,6 +94,12 @@ audigo:
       retry-base-delay-seconds: ${AUDIGO_SQS_OUTBOX_RETRY_BASE_DELAY_SECONDS:5}
       retry-max-delay-seconds: ${AUDIGO_SQS_OUTBOX_RETRY_MAX_DELAY_SECONDS:300}
       processing-lease-seconds: ${AUDIGO_SQS_OUTBOX_PROCESSING_LEASE_SECONDS:120}
+    result-consumer:
+      poller-delay-millis: ${AUDIGO_SQS_RESULT_POLLER_DELAY_MILLIS:1000}
+      wait-time-seconds: ${AUDIGO_SQS_RESULT_WAIT_TIME_SECONDS:20}
+      max-messages: ${AUDIGO_SQS_RESULT_MAX_MESSAGES:5}
+      concurrency: ${AUDIGO_SQS_RESULT_CONCURRENCY:2}
+      executor-queue-capacity: ${AUDIGO_SQS_RESULT_EXECUTOR_QUEUE_CAPACITY:20}
 
 sentry:
   dsn: ${SENTRY_DSN:}

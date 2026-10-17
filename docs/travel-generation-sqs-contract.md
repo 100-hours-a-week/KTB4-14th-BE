@@ -22,6 +22,11 @@ Backend -> AI Job Queue -> AI Worker -> AI Result Queue -> Backend -> DB
 | `AUDIGO_AI_JOB_QUEUE_URL` | 빈 값 | AI Job Queue URL |
 | `AUDIGO_AI_RESULT_QUEUE_URL` | 빈 값 | AI Result Queue URL |
 | `AUDIGO_SQS_ENDPOINT` | 빈 값 | 로컬 에뮬레이터를 사용할 때만 지정하는 Endpoint |
+| `AUDIGO_SQS_RESULT_POLLER_DELAY_MILLIS` | `1000` | Result Queue 수신 완료 후 다음 수신까지의 대기 시간 |
+| `AUDIGO_SQS_RESULT_WAIT_TIME_SECONDS` | `20` | Result Queue Long Polling 시간(1~20초) |
+| `AUDIGO_SQS_RESULT_MAX_MESSAGES` | `5` | 한 번에 수신할 Result 메시지 수(1~10개) |
+| `AUDIGO_SQS_RESULT_CONCURRENCY` | `2` | Result 메시지 DB 반영 동시성 |
+| `AUDIGO_SQS_RESULT_EXECUTOR_QUEUE_CAPACITY` | `20` | Result 처리 실행기의 내부 대기열 크기 |
 
 운영 환경은 Access Key를 애플리케이션 설정에 저장하지 않고 ECS Task Role을 사용한다. 로컬 환경은 AWS SDK 기본 자격 증명 체인의 프로필 또는 환경 변수를 사용한다.
 
@@ -91,6 +96,18 @@ AI Worker는 Backend DB를 조회하지 않으므로 `request`에 전체 AI 요�
 - `PROGRESS`: `stage`, `state`
 - `COMPLETED`: `payload`
 - `FAILED`: `error_message`
+
+## Backend Result 소비 규칙
+
+1. Result Queue는 전용 Long Polling 스케줄러로 조회한다.
+2. 메시지는 별도의 제한된 실행기에서 처리한다.
+3. 같은 `generation_job_id`의 동시 처리는 DB 행 잠금으로 직렬화한다.
+4. Standard Queue에서 진행 이벤트 순서가 바뀔 수 있으므로 단계 도착 순서를 실패 조건으로 사용하지 않는다.
+5. 진행 상태는 `PENDING -> RUNNING -> DONE` 방향으로만 반영하며 늦게 도착한 이전 상태는 무시한다.
+6. 진행 상태, 최종 일정 또는 실패 상태의 DB 트랜잭션이 커밋된 뒤 SQS 메시지를 삭제한다.
+7. 파싱 또는 DB 처리에 실패한 메시지는 삭제하지 않고 Visibility Timeout 이후 다시 수신한다.
+
+`event_id` 기반 중복 처리 방지와 반복 실패 메시지의 최종 처리 정책은 이슈 #137에서 추가한다.
 
 ## IAM 최소 권한
 
