@@ -49,7 +49,11 @@ public class MigrationWriteGateInterceptor implements AsyncHandlerInterceptor {
                 yield true;
             }
             case Admission.Hold hold -> {
-                queue.hold(request, response);
+                try {
+                    queue.hold(request, response);
+                } finally {
+                    gate.finishHold();
+                }
                 yield false;
             }
             case Admission.Skip skip -> throw new IllegalStateException("HTTP 쓰기 요청은 Skip 판정을 받지 않는다");
