@@ -84,6 +84,17 @@ public class TravelGenerationJobService {
                 TravelGenerationStageState.RUNNING, null);
     }
 
+    // 지연됐던 작업의 timeout 기준을 실제 시작 시각으로 옮긴다. 그대로 두면 watchdog이 지연 시간까지 세어 실패 처리한다
+    @Transactional
+    public void restartClock(Long jobId) {
+        TravelGenerationJob job = getJob(jobId);
+        if (job.getStatus() != TravelPlanStatus.GENERATING) {
+            return;
+        }
+        job.restartClock();
+        jobRepository.save(job);
+    }
+
     @Transactional
     public void handleEvent(Long jobId, AiGenerationEvent event) {
         TravelGenerationJob job = getJob(jobId);

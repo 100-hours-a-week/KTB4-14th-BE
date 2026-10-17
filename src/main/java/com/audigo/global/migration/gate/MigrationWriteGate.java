@@ -1,6 +1,11 @@
 package com.audigo.global.migration.gate;
 
 import com.audigo.global.migration.MigrationProperties;
+import com.audigo.global.migration.ai.DeferredAiJob;
+import com.audigo.global.migration.ai.DeferredAiJobQueue;
+import com.audigo.global.migration.ai.DeferredAiJobStats;
+import com.audigo.global.migration.ai.DeferredAiJobsReleasedEvent;
+import com.audigo.global.migration.ai.ReleasedAiJob;
 import com.audigo.global.migration.tracking.ActiveWriteTransactions;
 import com.audigo.global.migration.tracking.InFlightWorkTracker;
 import com.audigo.global.migration.tracking.TransactionWriteObserver;
@@ -9,6 +14,7 @@ import com.audigo.global.migration.tracking.WorkType;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
@@ -18,13 +24,15 @@ import java.util.concurrent.locks.ReentrantLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.TransactionDefinition;
 
 // 인스턴스 쓰기 단계와 진행 중 작업을 한 lock으로 관리한다.
 // 단계 확인 + 작업 등록, 단계 전이 + 잔여 작업 확인이 같은 임계 구역에서 일어나므로
 // drain 이후 입장한 쓰기가 freeze 판정을 빠져나가지 않는다.
-// 잔여 작업 = 열린 작업 티켓 + 진행 중인 쓰기 트랜잭션. 둘 다 0이어야 freeze 할 수 있다
+// 잔여 작업 = 열린 작업 티켓 + 진행 중인 쓰기 트랜잭션. 둘 다 0이어야 freeze 할 수 있다.
+// AI 시작 지연은 단계와 별개인 플래그다. drain 전에 켜서 AI 대기 시간을 쓰기 중단 구간 밖으로 옮기고, OPEN 도달 시 끈다
 @Component
 public class MigrationWriteGate implements TransactionWriteObserver {
 
@@ -34,6 +42,7 @@ public class MigrationWriteGate implements TransactionWriteObserver {
 
     private final MigrationProperties properties;
     private final Clock clock;
+    private final ApplicationEventPublisher eventPublisher;
 
     // Condition 대기를 쓰고, 가상 스레드에서 pinning이 생기지 않도록 synchronized 대신 사용
     private final ReentrantLock lock = new ReentrantLock();
@@ -43,6 +52,7 @@ public class MigrationWriteGate implements TransactionWriteObserver {
     private final ActiveWriteTransactions writeTransactions = new ActiveWriteTransactions();
     // drain-timeout 이상 열린 티켓 중 이미 경고한 것
     private final Set<Long> stuckWarnedTicketIds = new HashSet<>();
+    private final DeferredAiJobQueue deferredAiJobs = new DeferredAiJobQueue();
 
     private WritePhase phase = WritePhase.OPEN;
     // 마지막으로 적용한 명령의 migrationId·epoch. OPEN 복귀 후에도 남겨 오래된 명령을 거른다
@@ -53,15 +63,23 @@ public class MigrationWriteGate implements TransactionWriteObserver {
     private Instant frozenAt;
     private Instant resumeStartedAt;
     private Instant openedAt;
+    private boolean aiStartDeferred;
+    private Instant aiStartDeferredAt;
 
     @Autowired
-    public MigrationWriteGate(MigrationProperties properties) {
-        this(properties, Clock.systemUTC());
+    public MigrationWriteGate(MigrationProperties properties, ApplicationEventPublisher eventPublisher) {
+        this(properties, Clock.systemUTC(), eventPublisher);
     }
 
     MigrationWriteGate(MigrationProperties properties, Clock clock) {
+        this(properties, clock, event -> {
+        });
+    }
+
+    MigrationWriteGate(MigrationProperties properties, Clock clock, ApplicationEventPublisher eventPublisher) {
         this.properties = Objects.requireNonNull(properties, "properties");
         this.clock = Objects.requireNonNull(clock, "clock");
+        this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher");
     }
 
     // ---- 입장 판정 ----
@@ -69,28 +87,41 @@ public class MigrationWriteGate implements TransactionWriteObserver {
     public Admission tryAdmit(WorkType type, String description) {
         Objects.requireNonNull(type, "type");
         if (type == WorkType.AI_JOB) {
-            throw new IllegalArgumentException("AI_JOB은 admitAiJob으로 부모 티켓과 함께 입장해야 한다");
+            throw new IllegalArgumentException("AI_JOB은 admitAiJob으로 입장해야 한다");
         }
         lock.lock();
         try {
+            if (type == WorkType.SCHEDULED) {
+                // AI 시작 지연 중에는 watchdog이 지연 작업을 실패 처리하지 않도록 주기 작업도 건너뛴다
+                return phase == WritePhase.OPEN && !aiStartDeferred
+                        ? new Admission.Admitted(openTicket(type, description, null))
+                        : SKIP;
+            }
             if (phase == WritePhase.OPEN) {
                 return new Admission.Admitted(openTicket(type, description, null));
             }
-            return type == WorkType.SCHEDULED ? SKIP : HOLD;
+            return HOLD;
         } finally {
             lock.unlock();
         }
     }
 
-    // 이미 입장한 작업 안에서 AI 작업을 연다. 부모가 열려 있는 동안에는 단계와 상관없이 허용한다
-    public Admission.Admitted admitAiJob(WorkTicket parent, String description) {
-        Objects.requireNonNull(parent, "parent");
+    // 이미 입장한 작업(parent) 안에서 AI 작업을 연다. 부모가 열려 있는 동안 티켓을 열어 잔여가 0이 되는 순간이 없다.
+    // AI 시작 지연 중이면 티켓 없이 지연 큐에 넣는다.
+    // 부모 티켓이 없는 호출(요청 밖)은 OPEN에서만 바로 실행하고, 그 외 단계에서는 추적 빈틈이 없도록 지연시킨다
+    public AiJobStart admitAiJob(WorkTicket parent, long jobId, String description) {
         lock.lock();
         try {
-            if (!tracker.isOpen(parent)) {
+            if (parent != null && !tracker.isOpen(parent)) {
                 throw new IllegalStateException("부모 티켓이 열려 있지 않다: " + parent);
             }
-            return new Admission.Admitted(openTicket(WorkType.AI_JOB, description, parent.id()));
+            if (aiStartDeferred || (parent == null && phase != WritePhase.OPEN)) {
+                deferredAiJobs.add(jobId, now());
+                log.info("migration_ai_job_deferred job_id={} phase={} ai_start_deferred={} deferred_size={}",
+                        jobId, phase, aiStartDeferred, deferredAiJobs.size());
+                return new AiJobStart.Deferred();
+            }
+            return new AiJobStart.Run(openTicket(WorkType.AI_JOB, description, parent == null ? null : parent.id()));
         } finally {
             lock.unlock();
         }
@@ -111,6 +142,73 @@ public class MigrationWriteGate implements TransactionWriteObserver {
 
     // ---- 단계 전이 ----
 
+    // 신규 AI 실행을 컷오버 뒤로 미룬다. 컷오버 시도의 첫 명령이며, 이후 같은 migrationId·epoch로 drain한다.
+    // 플래그는 OPEN에 도달할 때(resume 완료) 또는 cancelAiStartDeferral로 꺼진다
+    public TransitionResult deferAiStart(PhaseCommand command) {
+        Objects.requireNonNull(command, "command");
+        lock.lock();
+        try {
+            if (!properties.enabled()) {
+                return reject("defer-ai-start", command, TransitionFailure.MIGRATION_DISABLED);
+            }
+            if (phase == WritePhase.OPEN && !aiStartDeferred) {
+                if (isSameOrOlderAttempt(command)) {
+                    return reject("defer-ai-start", command, TransitionFailure.STALE_COMMAND);
+                }
+                migrationId = command.migrationId();
+                epoch = command.epoch();
+                resumeTarget = null;
+                drainStartedAt = null;
+                frozenAt = null;
+                resumeStartedAt = null;
+                openedAt = null;
+                enableAiStartDeferral();
+                return TransitionResult.applied(snapshotLocked());
+            }
+            TransitionFailure failure = checkActiveAttempt(command);
+            if (failure != null) {
+                return reject("defer-ai-start", command, failure);
+            }
+            if (aiStartDeferred) {
+                return TransitionResult.idempotent(snapshotLocked());
+            }
+            enableAiStartDeferral();
+            return TransitionResult.applied(snapshotLocked());
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    // drain 전에 컷오버를 포기할 때 AI 시작 지연만 해제한다. drain 이후에는 resume으로 OPEN에 도달해야 해제된다
+    public TransitionResult cancelAiStartDeferral(PhaseCommand command) {
+        Objects.requireNonNull(command, "command");
+        List<ReleasedAiJob> released;
+        TransitionResult result;
+        lock.lock();
+        try {
+            if (phase != WritePhase.OPEN) {
+                return reject("cancel-ai-start-deferral", command, TransitionFailure.INVALID_TRANSITION);
+            }
+            if (!aiStartDeferred) {
+                return isSameAttempt(command)
+                        ? TransitionResult.idempotent(snapshotLocked())
+                        : reject("cancel-ai-start-deferral", command, isSameOrOlderAttempt(command)
+                                ? TransitionFailure.STALE_COMMAND
+                                : TransitionFailure.INVALID_TRANSITION);
+            }
+            TransitionFailure failure = checkActiveAttempt(command);
+            if (failure != null) {
+                return reject("cancel-ai-start-deferral", command, failure);
+            }
+            released = releaseDeferredAiJobsLocked();
+            result = TransitionResult.applied(snapshotLocked());
+        } finally {
+            lock.unlock();
+        }
+        publishReleased(released);
+        return result;
+    }
+
     public TransitionResult drain(PhaseCommand command) {
         Objects.requireNonNull(command, "command");
         lock.lock();
@@ -119,8 +217,12 @@ public class MigrationWriteGate implements TransactionWriteObserver {
                 return reject("drain", command, TransitionFailure.MIGRATION_DISABLED);
             }
             if (phase == WritePhase.OPEN) {
-                if (isSameOrOlderAttempt(command)) {
-                    return reject("drain", command, TransitionFailure.STALE_COMMAND);
+                // AI 시작 지연을 켠 시도는 같은 migrationId·epoch로 이어서 drain한다
+                TransitionFailure failure = aiStartDeferred
+                        ? checkActiveAttempt(command)
+                        : isSameOrOlderAttempt(command) ? TransitionFailure.STALE_COMMAND : null;
+                if (failure != null) {
+                    return reject("drain", command, failure);
                 }
                 migrationId = command.migrationId();
                 epoch = command.epoch();
@@ -219,8 +321,10 @@ public class MigrationWriteGate implements TransactionWriteObserver {
         }
     }
 
-    // 보류 큐가 빈 뒤 RESUMING → OPEN. 06에서 lock 안의 큐 크기 재확인을 추가한다
+    // 보류 큐가 빈 뒤 RESUMING → OPEN. 06에서 lock 안의 큐 크기 재확인을 추가한다.
+    // OPEN 도달과 같은 임계 구역에서 AI 시작 지연을 끄고 지연 작업의 티켓을 연 뒤, lock 밖에서 제출 이벤트를 발행한다
     public boolean tryCompleteResume() {
+        List<ReleasedAiJob> released;
         lock.lock();
         try {
             if (phase != WritePhase.RESUMING) {
@@ -228,10 +332,12 @@ public class MigrationWriteGate implements TransactionWriteObserver {
             }
             openedAt = now();
             changePhase(WritePhase.OPEN);
-            return true;
+            released = releaseDeferredAiJobsLocked();
         } finally {
             lock.unlock();
         }
+        publishReleased(released);
+        return true;
     }
 
     // 열린 티켓과 쓰기 트랜잭션이 모두 0이 될 때까지 기다린다. 시간 안에 0이 되면 true
@@ -294,7 +400,55 @@ public class MigrationWriteGate implements TransactionWriteObserver {
         }
     }
 
+    public DeferredAiJobStats deferredAiJobStats() {
+        lock.lock();
+        try {
+            return deferredAiJobStatsLocked();
+        } finally {
+            lock.unlock();
+        }
+    }
+
     // ---- 내부 ----
+
+    private void enableAiStartDeferral() {
+        aiStartDeferred = true;
+        aiStartDeferredAt = now();
+        log.info("migration_ai_start_deferred migration_id={} epoch={} phase={}", migrationId, epoch, phase);
+    }
+
+    // 지연을 끄고, 지연된 작업마다 AI_JOB 티켓을 연다. 티켓이 먼저 열리므로 다음 drain이 이 작업들을 기다린다
+    private List<ReleasedAiJob> releaseDeferredAiJobsLocked() {
+        boolean wasDeferred = aiStartDeferred;
+        aiStartDeferred = false;
+        aiStartDeferredAt = null;
+        List<ReleasedAiJob> released = new ArrayList<>();
+        for (DeferredAiJob job : deferredAiJobs.drainAll()) {
+            WorkTicket ticket = openTicket(WorkType.AI_JOB, "ai-job:" + job.jobId(), null);
+            released.add(new ReleasedAiJob(job.jobId(), job.deferredAt(), ticket));
+        }
+        if (wasDeferred || !released.isEmpty()) {
+            log.info("migration_ai_start_released migration_id={} epoch={} released={}",
+                    migrationId, epoch, released.size());
+        }
+        return released;
+    }
+
+    // 리스너가 워커에 제출하거나 실패 시 티켓을 닫는다
+    private void publishReleased(List<ReleasedAiJob> released) {
+        if (!released.isEmpty()) {
+            eventPublisher.publishEvent(new DeferredAiJobsReleasedEvent(released));
+        }
+    }
+
+    private DeferredAiJobStats deferredAiJobStatsLocked() {
+        return new DeferredAiJobStats(
+                aiStartDeferred,
+                aiStartDeferredAt,
+                deferredAiJobs.size(),
+                deferredAiJobs.oldestWait(now())
+        );
+    }
 
     private WorkTicket openTicket(WorkType type, String description, Long parentId) {
         return tracker.open(type, description, parentId, now(), this::release);
@@ -390,7 +544,8 @@ public class MigrationWriteGate implements TransactionWriteObserver {
                 drainStartedAt,
                 frozenAt,
                 resumeStartedAt,
-                openedAt
+                openedAt,
+                deferredAiJobStatsLocked()
         );
     }
 

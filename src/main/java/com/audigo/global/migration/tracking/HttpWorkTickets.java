@@ -3,6 +3,8 @@ package com.audigo.global.migration.tracking;
 import jakarta.servlet.AsyncEvent;
 import jakarta.servlet.AsyncListener;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 // HTTP 요청에 작업 티켓을 묶고 요청이 끝나면 닫는다
 public final class HttpWorkTickets {
@@ -23,6 +25,14 @@ public final class HttpWorkTickets {
 
     public static WorkTicket bound(HttpServletRequest request) {
         return (WorkTicket) request.getAttribute(TICKET_ATTR);
+    }
+
+    // 현재 스레드가 처리 중인 HTTP 요청에 묶인 티켓. 요청 밖이거나 묶인 티켓이 없으면 null
+    public static WorkTicket current() {
+        if (RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attributes) {
+            return bound(attributes.getRequest());
+        }
+        return null;
     }
 
     // 묶인 티켓을 닫고 요청에서 제거한다. 여러 번 호출해도 된다

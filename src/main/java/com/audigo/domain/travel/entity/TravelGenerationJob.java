@@ -71,6 +71,11 @@ public class TravelGenerationJob {
         }
     }
 
+    // 컷오버로 시작이 지연된 작업을 실제로 시작할 때 사용한다. markStarted는 기존 값을 유지하므로 별도로 둔다
+    public void restartClock() {
+        this.startedAt = LocalDateTime.now();
+    }
+
     public void complete() {
         this.status = TravelPlanStatus.COMPLETED;
         this.errorMessage = null;
