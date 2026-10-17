@@ -1,0 +1,62 @@
+{
+  "migration_id": "cutover-20261020",
+  "epoch": 1,
+  "region": "ap-northeast-2",
+  "admin_key_ssm_parameter": "/audigo/prod/migration-admin-key",
+  "discovery": {
+    "tag_key": "Service",
+    "tag_value": "audigo-backend",
+    "port": 8080
+  },
+  "instances_comment": "discovery 대신 고정 목록을 쓰려면 instances에 [{\"name\": \"be-1\", \"url\": \"http://10.0.1.23:8080\"}] 형식으로 넣는다",
+  "timeouts": {
+    "http_seconds": 10,
+    "ai_wait_seconds": 360,
+    "freeze_wait_seconds": 30,
+    "freeze_total_seconds": 120,
+    "dms_verify_seconds": 60,
+    "dms_stop_seconds": 120,
+    "open_wait_seconds": 120
+  },
+  "dms": {
+    "region": "ap-northeast-2",
+    "task_arn": "arn:aws:dms:ap-northeast-2:123456789012:task:XXXXXXXX",
+    "accepted_validation_states": [
+      "Validated"
+    ]
+  },
+  "proxysql": {
+    "admin": {
+      "host": "10.0.2.10",
+      "port": 6032,
+      "user": "radmin",
+      "password_env": "PROXYSQL_ADMIN_PASSWORD"
+    },
+    "hostgroups": [
+      10
+    ],
+    "source": {
+      "host": "10.0.3.20",
+      "port": 3306
+    },
+    "target": {
+      "host": "audigo.xxxxxxxx.ap-northeast-2.rds.amazonaws.com",
+      "port": 3306
+    },
+    "route_check": {
+      "host": "10.0.2.10",
+      "port": 6033,
+      "user": "audigo",
+      "password_env": "APP_DB_PASSWORD",
+      "query": "SELECT @@server_uuid",
+      "expected": "<RDS에서 미리 조회한 SELECT @@server_uuid 값>"
+    }
+  },
+  "source_mysql": {
+    "set_super_read_only": false,
+    "host": "10.0.3.20",
+    "port": 3306,
+    "user": "admin",
+    "password_env": "SOURCE_MYSQL_PASSWORD"
+  }
+}
