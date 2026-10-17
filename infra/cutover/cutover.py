@@ -5,8 +5,12 @@
 DMS 최종 반영·검증, ProxySQL 목적지 전환을 순서대로 수행한다.
 
     시작 전 점검 → AI 시작 지연 → AI 작업 0 대기 → drain → freeze(잔여 0)
-    → [원본 쓰기 차단] → DMS 최종 반영·검증 → DMS 중지 → ProxySQL 전환·확인
-    → resume(RDS) → OPEN 대기 → 결과 보고
+    → [원본 쓰기 차단] → DMS 최종 반영·검증 → DMS 중지 요청 → ProxySQL 전환·확인
+    → resume(RDS) → OPEN 대기 → DMS 중지 확인 → 결과 보고
+
+DMS 중지는 수십 초가 걸릴 수 있다. 원본 super_read_only=ON이면 원본에 새 변경이 생길 수 없어
+DMS가 RDS에 더 쓸 내용이 없으므로, 중지 요청만 보내고 완료 확인은 쓰기 재개(OPEN) 뒤로 미룬다.
+super_read_only를 걸지 않으면 지금처럼 중지 완료까지 기다린 뒤 전환한다.
 
 원칙 (docs/db/cut-over.md)
 - RDS 쓰기 허용(resume RDS) 전에 실패하면 ProxySQL을 원본으로 되돌리고 resume(ORIGIN)으로 취소한다.
@@ -88,6 +92,7 @@ class Recorder:
                 "cdc_catchup": self.between("cdc_marker_written", "cdc_caught_up"),
                 "dms_verify": self.between("dms_verify", "dms_verified"),
                 "write_stop": self.between("frozen", "resume_sent"),
+                "dms_stop": self.between("dms_stop_requested", "dms_stopped"),
                 "resume_to_open": self.between("resume_sent", "opened"),
             },
             "events": self.events,
@@ -216,6 +221,7 @@ class Cutover:
         self.proxysql_switched = False
         self.source_read_only_set = False
         self.dms_stopped = False
+        self.dms_stop_deferred = False
         self.rds_writes_allowed = False
         self.marker_id = None
 
@@ -250,6 +256,7 @@ class Cutover:
         # 여기부터는 RDS 쓰기 허용. 실패해도 취소하지 않는다
         self.resume_rds()
         self.wait_open()
+        self.confirm_dms_stopped()
         self.retire_source()
         self.report()
         return True
@@ -294,6 +301,10 @@ class Cutover:
             task.get("Status"), task.get("ReplicationTaskStats", {}).get("FullLoadProgressPercent")))
         if task.get("Status") != "running":
             problems.append("DMS task가 running이 아니다: {}".format(task.get("Status")))
+        if not (self.config.get("source_mysql") or {}).get("set_super_read_only"):
+            self.rec.log("원본 super_read_only를 걸지 않으므로 DMS 중지 완료까지 쓰기 중단이 이어진다", "WARN")
+        if "set_super_read_only" in (self.config.get("cdc_marker") or {}).get("source", {}):
+            problems.append("set_super_read_only는 cdc_marker.source가 아니라 source_mysql 항목에 둔다")
 
     def preflight_cdc_marker(self, problems):
         marker = self.config.get("cdc_marker")
@@ -434,20 +445,57 @@ class Cutover:
             time.sleep(2)
 
     def stop_dms(self):
+        """CDC 마커 도착·검증 통과 뒤라 RDS에는 마지막 변경까지 반영돼 있다.
+        원본 super_read_only=ON이면 원본에 새 변경이 생길 수 없어 DMS가 RDS에 더 쓸 내용이 없으므로
+        중지 완료를 기다리지 않고 전환한다. 완료 확인은 OPEN 뒤에 한다(confirm_dms_stopped)"""
         dms = self.config.get("dms")
         if not dms:
             return
-        self.step("DMS task 중지", lambda: aws(
+        self.step("DMS task 중지 요청", lambda: aws(
             ["dms", "stop-replication-task", "--replication-task-arn", dms["task_arn"]], dms["region"]))
         self.dms_stopped = True
+        self.rec.mark("dms_stop_requested")
+        if self.source_read_only_set:
+            self.dms_stop_deferred = True
+            self.rec.log("원본 super_read_only=ON: DMS 중지 완료는 쓰기 재개 뒤에 확인한다")
+            return
         if self.dry_run:
             return
+        self.rec.log("원본 super_read_only 없음: DMS가 RDS에 더 쓰지 않도록 중지 완료까지 기다린다", "WARN")
+        if not self.wait_dms_stopped(dms):
+            raise CutoverAbort("DMS task가 stopped가 되지 않았다")
+
+    def wait_dms_stopped(self, dms):
         deadline = time.monotonic() + self.timeouts.get("dms_stop_seconds", 120)
-        while describe_dms_task(dms).get("Status") != "stopped":
+        while True:
+            try:
+                status = describe_dms_task(dms).get("Status")
+            except Exception as error:  # noqa: BLE001 - 일시적 조회 실패는 재시도한다
+                self.rec.log("DMS 상태 조회 실패, 재시도: {}".format(error), "WARN")
+                status = None
+            if status == "stopped":
+                self.rec.mark("dms_stopped")
+                self.rec.log("DMS 중지 완료 (요청 후 {} ms)".format(
+                    self.rec.between("dms_stop_requested", "dms_stopped")))
+                return True
             if time.monotonic() > deadline:
-                raise CutoverAbort("DMS task가 stopped가 되지 않았다")
+                self.rec.log("DMS task 상태: {}".format(status), "ERROR")
+                return False
             time.sleep(2)
-        self.rec.mark("dms_stopped")
+
+    def confirm_dms_stopped(self):
+        """쓰기 재개 뒤 DMS가 실제로 멈췄는지 확인한다. RDS를 유지하므로 실패해도 취소하지 않는다"""
+        dms = self.config.get("dms")
+        if not dms or not self.dms_stop_deferred:
+            return
+        if self.dry_run:
+            self.rec.log("[dry-run] 대기: DMS task stopped")
+            return
+        if self.wait_dms_stopped(dms):
+            self.rec.log("중지 전 DMS 검증 결과의 불일치는 RDS 신규 쓰기와 비교된 것일 수 있어 판단에 쓰지 않는다")
+            return
+        self.rec.log("DMS task가 아직 stopped가 아니다. 원본은 super_read_only=ON이라 RDS에 새로 반영될 변경은 없다. "
+                     "aws dms describe-replication-tasks로 상태를 확인하고, 계속 멈추지 않으면 다시 중지 요청한다", "ERROR")
 
     def switch_proxysql(self):
         proxysql = self.config.get("proxysql")
@@ -548,7 +596,7 @@ class Cutover:
             self.step("원본 MySQL super_read_only=OFF",
                       lambda: mysql_query(self.config["source_mysql"], "SET GLOBAL super_read_only = OFF"))
         if self.dms_stopped:
-            self.rec.log("DMS가 중지됐다. 원본 쓰기 재개 후 RDS에 반영하려면 DMS task를 다시 시작해야 한다", "WARN")
+            self.rec.log("DMS 중지를 요청했다. stopped가 된 뒤 DMS task를 다시 시작해야 원본 쓰기가 RDS에 반영된다", "WARN")
         # 단계별로 받을 수 있는 인스턴스만 취소된다. OPEN(아직 drain 전)은 지연만 해제한다
         for instance, (status, error) in parallel(self.instances, self.api.status).items():
             if error:
