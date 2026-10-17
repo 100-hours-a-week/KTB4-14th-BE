@@ -124,6 +124,11 @@ public class PendingWriteQueue {
         return size.get() == 0;
     }
 
+    // 실행되지 않고 큐에서 빠진 누적 건수 (시간 초과 + 연결 종료)
+    public long leftWithoutDispatch() {
+        return timedOut.get() + abandoned.get();
+    }
+
     public PendingQueueStats stats() {
         Instant now = clock.instant();
         List<PendingWriteSummary> head = new ArrayList<>();
@@ -191,6 +196,7 @@ public class PendingWriteQueue {
         @Override
         public void onTimeout(AsyncEvent event) throws IOException {
             if (!pending.transition(PendingWrite.State.QUEUED, PendingWrite.State.TIMED_OUT)) {
+                pending.finish(statusOf(event));
                 return;
             }
             leaveQueue(pending);
@@ -210,6 +216,7 @@ public class PendingWriteQueue {
         // 클라이언트 연결 종료. 응답을 받을 수 없으므로 실행하지 않는다 (재시도와 겹친 중복 쓰기 방지)
         @Override
         public void onError(AsyncEvent event) {
+            pending.finish(PendingWrite.UNKNOWN_STATUS);
             if (pending.transition(PendingWrite.State.QUEUED, PendingWrite.State.ABANDONED)) {
                 leaveQueue(pending);
                 abandoned.incrementAndGet();
@@ -220,9 +227,10 @@ public class PendingWriteQueue {
             }
         }
 
-        // 실행 없이 끝난 경우(컨테이너 종료 등)도 큐에서 뺀다
+        // 재개된 요청은 응답 완료를 알린다. 실행 없이 끝난 경우(컨테이너 종료 등)는 큐에서 뺀다
         @Override
         public void onComplete(AsyncEvent event) {
+            pending.finish(statusOf(event));
             if (pending.transition(PendingWrite.State.QUEUED, PendingWrite.State.ABANDONED)) {
                 leaveQueue(pending);
                 abandoned.incrementAndGet();
@@ -234,6 +242,13 @@ public class PendingWriteQueue {
         @Override
         public void onStartAsync(AsyncEvent event) {
             event.getAsyncContext().addListener(this);
+        }
+
+        private static int statusOf(AsyncEvent event) {
+            if (event.getSuppliedResponse() instanceof HttpServletResponse response) {
+                return response.getStatus();
+            }
+            return PendingWrite.UNKNOWN_STATUS;
         }
 
         private long waitedMillis() {
