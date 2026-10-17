@@ -39,10 +39,8 @@ public enum ErrorCode {
     MIGRATION_ATTEMPT_IN_PROGRESS(HttpStatus.CONFLICT, "migration_attempt_in_progress"),
     MIGRATION_INVALID_PHASE(HttpStatus.CONFLICT, "migration_invalid_phase"),
     MIGRATION_REMAINING_WORK(HttpStatus.CONFLICT, "migration_remaining_work"),
-    MIGRATION_RESUME_TARGET_REQUIRED(HttpStatus.BAD_REQUEST, "migration_resume_target_required");
-    MIGRATION_PENDING_QUEUE_FULL(HttpStatus.SERVICE_UNAVAILABLE, "migration_pending_queue_full");
-    CHAT_MESSAGE_RATE_LIMIT_EXCEEDED(HttpStatus.TOO_MANY_REQUESTS, "chat_message_rate_limit_exceeded"),
-    SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "service_unavailable");
+    MIGRATION_RESUME_TARGET_REQUIRED(HttpStatus.BAD_REQUEST, "migration_resume_target_required"),
+    CHAT_MESSAGE_RATE_LIMIT_EXCEEDED(HttpStatus.TOO_MANY_REQUESTS, "chat_message_rate_limit_exceeded");
 
     private final HttpStatus status;
     private final String message;
