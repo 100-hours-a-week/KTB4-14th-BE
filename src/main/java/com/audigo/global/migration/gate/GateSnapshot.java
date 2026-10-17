@@ -20,7 +20,9 @@ public record GateSnapshot(
         Instant frozenAt,
         Instant resumeStartedAt,
         Instant openedAt,
-        DeferredAiJobStats deferredAiJobs
+        DeferredAiJobStats deferredAiJobs,
+        // FROZEN 중 거부한 쓰기 트랜잭션 누적 수. 0이 아니면 통제 누락
+        long frozenWriteRejections
 ) {
 
     public GateSnapshot {
