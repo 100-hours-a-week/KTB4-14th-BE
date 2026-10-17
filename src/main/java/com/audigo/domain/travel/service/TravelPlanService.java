@@ -11,6 +11,7 @@ import com.audigo.domain.travel.entity.PlaceProvider;
 import com.audigo.domain.travel.entity.TravelPlaceSource;
 import com.audigo.domain.travel.entity.TravelPlanPlace;
 import com.audigo.domain.travel.entity.Region;
+import com.audigo.domain.travel.entity.TravelGenerationJob;
 import com.audigo.domain.travel.entity.TravelPlan;
 import com.audigo.domain.travel.entity.TravelPlanStatus;
 import com.audigo.domain.travel.entity.TravelPreference;
@@ -118,6 +119,11 @@ public class TravelPlanService {
     // 여행 생성하기 요청(1단계)
     @Transactional
     public TravelPlan createTravelPlan(Long userId, TravelPlanRequest request) {
+        return createTravelPlanWithGenerationJob(userId, request).getTravelPlan();
+    }
+
+    @Transactional
+    public TravelGenerationJob createTravelPlanWithGenerationJob(Long userId, TravelPlanRequest request) {
         validateRequest(request);
         if (travelGenerationJobRepository.existsByTravelPlanUserIdAndStatus(
                 userId,
@@ -143,8 +149,7 @@ public class TravelPlanService {
 
         addRequiredPlaces(travelPlan, request.requiredPlaces());
         TravelPlan savedPlan = travelPlanRepository.save(travelPlan);
-        travelGenerationJobRepository.save(com.audigo.domain.travel.entity.TravelGenerationJob.create(savedPlan));
-        return savedPlan;
+        return travelGenerationJobRepository.save(TravelGenerationJob.create(savedPlan));
     }
 
     @Transactional

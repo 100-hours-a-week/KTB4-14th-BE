@@ -106,6 +106,6 @@ AI Worker는 Backend DB를 조회하지 않으므로 `request`에 전체 AI 요�
 
 ## 후속 구현 경계
 
-- Outbox 저장과 AI Job Queue 발행: 이슈 #135
+- Outbox 저장과 AI Job Queue 발행: 이슈 #135 (`travel-generation-outbox-migration.md`)
 - AI Result Queue 소비와 결과 저장: 이슈 #136
 - 중복 처리와 최종 실패 복구: 이슈 #137
