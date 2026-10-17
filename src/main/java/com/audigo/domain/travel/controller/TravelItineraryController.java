@@ -5,6 +5,7 @@ import com.audigo.domain.travel.dto.ItineraryCompletionResponse;
 import com.audigo.domain.travel.dto.ItineraryResponse;
 import com.audigo.domain.travel.dto.RouteRecalculationResponse;
 import com.audigo.domain.travel.service.TravelItineraryService;
+import com.audigo.global.migration.classify.PureRead;
 import com.audigo.global.response.ApiResponse;
 import com.audigo.global.security.CurrentUser;
 import jakarta.validation.Valid;
@@ -27,6 +28,7 @@ public class TravelItineraryController {
         this.itineraryService = itineraryService;
     }
 
+    @PureRead(reason = "readOnly 트랜잭션 + 메모리 메타데이터 보강 + 외부 장소 조회")
     @GetMapping("/api/travel-plans/{travelPlanId}/itinerary")
     public ApiResponse<ItineraryResponse> getItinerary(@PathVariable Long travelPlanId) {
         return ApiResponse.of(
