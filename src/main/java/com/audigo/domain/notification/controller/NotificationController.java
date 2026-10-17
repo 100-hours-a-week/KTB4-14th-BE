@@ -68,6 +68,7 @@ public class NotificationController {
         return ResponseEntity.noContent().build();
     }
 
+    @PureRead(reason = "readOnly 트랜잭션 조회. 설정이 없으면 저장하지 않고 기본값 반환")
     @GetMapping("/api/notification-settings")
     public ApiResponse<NotificationSettingsResponse> getSettings() {
         return ApiResponse.of("notification_settings_found", notificationService.getSettings(currentUser.id()));

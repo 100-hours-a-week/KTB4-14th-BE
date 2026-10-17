@@ -27,7 +27,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.CannotCreateTransactionException;
 import org.springframework.transaction.TransactionDefinition;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 // 인스턴스 쓰기 단계와 진행 중 작업을 한 lock으로 관리한다.
 // 단계 확인 + 작업 등록, 단계 전이 + 잔여 작업 확인이 같은 임계 구역에서 일어나므로
@@ -68,6 +71,8 @@ public class MigrationWriteGate implements TransactionWriteObserver {
     private Instant aiStartDeferredAt;
     // Hold 판정을 받고 아직 보류 큐에 들어가지 않은 요청 수. RESUMING → OPEN 판정에서 놓치지 않기 위해 센다
     private int holdsInProgress;
+    // FROZEN 중 거부한 쓰기 트랜잭션 수. 정상이라면 0이며, 0이 아니면 통제 누락이다
+    private long frozenWriteRejections;
 
     @Autowired
     public MigrationWriteGate(MigrationProperties properties, ApplicationEventPublisher eventPublisher) {
@@ -382,11 +387,19 @@ public class MigrationWriteGate implements TransactionWriteObserver {
 
     // ---- 쓰기 트랜잭션 추적 (MigrationAwareJpaTransactionManager가 호출) ----
 
-    // FROZEN 중 쓰기 트랜잭션 거부는 07에서 추가한다
+    // 안전망: FROZEN 중 새 쓰기 트랜잭션은 시작하지 않는다. DRAINING은 진행 중 작업의 마지막 저장을 위해 허용한다
     @Override
     public void beforeWriteBegin(Object transaction, TransactionDefinition definition) {
         lock.lock();
         try {
+            if (phase == WritePhase.FROZEN) {
+                frozenWriteRejections++;
+                log.error("migration_frozen_write_rejected transaction={} thread={} uri={} migration_id={} epoch={} rejected_total={}",
+                        definition.getName(), Thread.currentThread().getName(), currentRequestUri(),
+                        migrationId, epoch, frozenWriteRejections);
+                throw new CannotCreateTransactionException(
+                        "migration_frozen: 쓰기 중단 구간에는 쓰기 트랜잭션을 시작할 수 없다 (" + definition.getName() + ")");
+            }
             writeTransactions.begin(transaction, definition.getName(), now());
         } finally {
             lock.unlock();
@@ -409,6 +422,15 @@ public class MigrationWriteGate implements TransactionWriteObserver {
         lock.lock();
         try {
             return snapshotLocked();
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    public long frozenWriteRejections() {
+        lock.lock();
+        try {
+            return frozenWriteRejections;
         } finally {
             lock.unlock();
         }
@@ -568,8 +590,16 @@ public class MigrationWriteGate implements TransactionWriteObserver {
                 frozenAt,
                 resumeStartedAt,
                 openedAt,
-                deferredAiJobStatsLocked()
+                deferredAiJobStatsLocked(),
+                frozenWriteRejections
         );
+    }
+
+    private static String currentRequestUri() {
+        if (RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attributes) {
+            return attributes.getRequest().getMethod() + " " + attributes.getRequest().getRequestURI();
+        }
+        return "-";
     }
 
     private Instant now() {

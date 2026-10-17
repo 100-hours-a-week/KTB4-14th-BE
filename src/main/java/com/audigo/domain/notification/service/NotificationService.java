@@ -81,9 +81,10 @@ public class NotificationService {
                 .forEach(Notification::markRead);
     }
 
-    @Transactional
+    // 조회만 한다. 설정이 없으면 저장하지 않고 기본값을 반환하고, 생성은 updateSettings에서만 한다
+    @Transactional(readOnly = true)
     public NotificationSettingsResponse getSettings(Long userId) {
-        return NotificationSettingsResponse.from(findOrCreateSettings(userId));
+        return NotificationSettingsResponse.from(findSettingsOrDefault(userId));
     }
 
     @Transactional
@@ -110,7 +111,8 @@ public class NotificationService {
             throw new BusinessException(ErrorCode.INVALID_NOTIFICATION_REQUEST);
         }
         User user = findActiveUser(command.userId());
-        NotificationSetting setting = findOrCreateSettings(user.id());
+        NotificationSetting setting = notificationSettingRepository.findByUser_Id(user.id())
+                .orElseGet(() -> NotificationSetting.createDefault(user));
         if (!setting.enabledFor(command.notificationType())) {
             log.info("notification_skipped user_id={} type={} reason=disabled", user.id(), command.notificationType());
             return NotificationCreateResult.skipped();
@@ -194,6 +196,12 @@ public class NotificationService {
                 NotificationTargetType.TRAVEL_PLAN,
                 travelPlanId
         ));
+    }
+
+    // 저장하지 않은 기본값 엔티티를 반환한다. 영속화하지 않으므로 쓰기가 일어나지 않는다
+    private NotificationSetting findSettingsOrDefault(Long userId) {
+        return notificationSettingRepository.findByUser_Id(userId)
+                .orElseGet(() -> NotificationSetting.createDefault(findActiveUser(userId)));
     }
 
     private NotificationSetting findOrCreateSettings(Long userId) {
