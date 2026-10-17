@@ -2,6 +2,7 @@ package com.audigo.global.migration.pending;
 
 import com.audigo.global.error.ErrorCode;
 import com.audigo.global.logging.RequestLoggingFilter;
+import com.audigo.global.migration.MigrationErrorEvent;
 import com.audigo.global.migration.MigrationProperties;
 import jakarta.servlet.AsyncContext;
 import jakarta.servlet.AsyncEvent;
@@ -22,6 +23,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -39,6 +41,7 @@ public class PendingWriteQueue {
     private final MigrationProperties properties;
     private final MigrationErrorResponseWriter errorResponseWriter;
     private final Clock clock;
+    private final ApplicationEventPublisher eventPublisher;
     // STATELESS 보안 설정의 기본 저장소와 같은 속성 이름을 쓴다. ASYNC 재디스패치 때 SecurityContextHolderFilter가 복원한다
     private final SecurityContextRepository securityContextRepository = new RequestAttributeSecurityContextRepository();
 
@@ -51,15 +54,26 @@ public class PendingWriteQueue {
     private final AtomicLong abandoned = new AtomicLong();
     private final AtomicLong rejected = new AtomicLong();
 
-    @Autowired
     public PendingWriteQueue(MigrationProperties properties, MigrationErrorResponseWriter errorResponseWriter) {
         this(properties, errorResponseWriter, Clock.systemUTC());
     }
 
     PendingWriteQueue(MigrationProperties properties, MigrationErrorResponseWriter errorResponseWriter, Clock clock) {
+        this(properties, errorResponseWriter, clock, event -> {
+        });
+    }
+
+    @Autowired
+    public PendingWriteQueue(
+            MigrationProperties properties,
+            MigrationErrorResponseWriter errorResponseWriter,
+            Clock clock,
+            ApplicationEventPublisher eventPublisher
+    ) {
         this.properties = Objects.requireNonNull(properties, "properties");
         this.errorResponseWriter = Objects.requireNonNull(errorResponseWriter, "errorResponseWriter");
         this.clock = Objects.requireNonNull(clock, "clock");
+        this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher");
     }
 
     // 요청을 보류한다. 용량을 넘으면 즉시 503으로 응답하고 null을 반환한다
@@ -69,6 +83,10 @@ public class PendingWriteQueue {
             rejected.incrementAndGet();
             log.warn("migration_write_rejected reason=queue_full method={} uri={} request_id={} capacity={}",
                     request.getMethod(), request.getRequestURI(), requestId(request), properties.pendingCapacity());
+            eventPublisher.publishEvent(new MigrationErrorEvent(
+                    "migration_write_rejected",
+                    "queue_full " + request.getMethod() + " " + request.getRequestURI()
+                            + " capacity=" + properties.pendingCapacity()));
             errorResponseWriter.writeRetryLater(response, ErrorCode.MIGRATION_PENDING_QUEUE_FULL);
             return null;
         }

@@ -1,9 +1,11 @@
 package com.audigo.domain.travel.service;
 
 import com.audigo.domain.travel.dto.AiTravelGenerationRequest;
+import com.audigo.global.migration.MigrationErrorEvent;
 import com.audigo.global.migration.ai.AiJobTicketRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
@@ -17,17 +19,20 @@ public class TravelGenerationWorker {
     private final TravelGenerationJobService jobService;
     private final TravelGenerationContextStore contextStore;
     private final AiJobTicketRegistry ticketRegistry;
+    private final ApplicationEventPublisher eventPublisher;
 
     public TravelGenerationWorker(
             AiGenerationClient aiGenerationClient,
             TravelGenerationJobService jobService,
             TravelGenerationContextStore contextStore,
-            AiJobTicketRegistry ticketRegistry
+            AiJobTicketRegistry ticketRegistry,
+            ApplicationEventPublisher eventPublisher
     ) {
         this.aiGenerationClient = aiGenerationClient;
         this.jobService = jobService;
         this.contextStore = contextStore;
         this.ticketRegistry = ticketRegistry;
+        this.eventPublisher = eventPublisher;
     }
 
     // finishStream·markFailed는 @Transactional public 메서드라 반환 시점에 커밋이 끝난다.
@@ -71,6 +76,8 @@ public class TravelGenerationWorker {
             jobService.markFailed(jobId, message);
         } catch (RuntimeException exception) {
             log.error("migration_ai_job_final_save_failed job_id={}", jobId, exception);
+            eventPublisher.publishEvent(new MigrationErrorEvent(
+                    "migration_ai_job_final_save_failed", "job_id=" + jobId + " " + exception.getClass().getSimpleName()));
         }
     }
 }
