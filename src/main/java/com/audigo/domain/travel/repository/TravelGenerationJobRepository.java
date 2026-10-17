@@ -1,6 +1,7 @@
 package com.audigo.domain.travel.repository;
 
 import com.audigo.domain.travel.entity.TravelGenerationJob;
+import com.audigo.domain.travel.entity.TravelGenerationExecutionStatus;
 import com.audigo.domain.travel.entity.TravelPlanStatus;
 import jakarta.persistence.LockModeType;
 import java.time.LocalDateTime;
@@ -23,5 +24,8 @@ public interface TravelGenerationJobRepository extends JpaRepository<TravelGener
 
     boolean existsByTravelPlanUserIdAndStatus(Long userId, TravelPlanStatus status);
 
-    List<TravelGenerationJob> findByStatusAndStartedAtBefore(TravelPlanStatus status, LocalDateTime startedAt);
+    List<TravelGenerationJob> findByExecutionStatusAndStartedAtBefore(
+            TravelGenerationExecutionStatus executionStatus,
+            LocalDateTime startedAt
+    );
 }
