@@ -1,5 +1,6 @@
 package com.audigo.global.migration.gate;
 
+import com.audigo.global.migration.MigrationErrorEvent;
 import com.audigo.global.migration.MigrationProperties;
 import com.audigo.global.migration.ai.DeferredAiJob;
 import com.audigo.global.migration.ai.DeferredAiJobQueue;
@@ -74,7 +75,6 @@ public class MigrationWriteGate implements TransactionWriteObserver {
     // FROZEN 중 거부한 쓰기 트랜잭션 수. 정상이라면 0이며, 0이 아니면 통제 누락이다
     private long frozenWriteRejections;
 
-    @Autowired
     public MigrationWriteGate(MigrationProperties properties, ApplicationEventPublisher eventPublisher) {
         this(properties, Clock.systemUTC(), eventPublisher);
     }
@@ -84,7 +84,8 @@ public class MigrationWriteGate implements TransactionWriteObserver {
         });
     }
 
-    MigrationWriteGate(MigrationProperties properties, Clock clock, ApplicationEventPublisher eventPublisher) {
+    @Autowired
+    public MigrationWriteGate(MigrationProperties properties, Clock clock, ApplicationEventPublisher eventPublisher) {
         this.properties = Objects.requireNonNull(properties, "properties");
         this.clock = Objects.requireNonNull(clock, "clock");
         this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher");
@@ -397,6 +398,12 @@ public class MigrationWriteGate implements TransactionWriteObserver {
                 log.error("migration_frozen_write_rejected transaction={} thread={} uri={} migration_id={} epoch={} rejected_total={}",
                         definition.getName(), Thread.currentThread().getName(), currentRequestUri(),
                         migrationId, epoch, frozenWriteRejections);
+                // 오류 이력은 Gate를 다시 호출하지 않으므로 lock 안에서 발행해도 된다
+                eventPublisher.publishEvent(new MigrationErrorEvent(
+                        "migration_frozen_write_rejected",
+                        definition.getName() + " thread=" + Thread.currentThread().getName()
+                                + " uri=" + currentRequestUri(),
+                        migrationId));
                 throw new CannotCreateTransactionException(
                         "migration_frozen: 쓰기 중단 구간에는 쓰기 트랜잭션을 시작할 수 없다 (" + definition.getName() + ")");
             }
@@ -434,6 +441,28 @@ public class MigrationWriteGate implements TransactionWriteObserver {
         } finally {
             lock.unlock();
         }
+    }
+
+    // 오래된 순. 상태 조회용
+    public List<WorkTicket> openTickets() {
+        lock.lock();
+        try {
+            return tracker.openTickets();
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    // 컷오버 제어 오류를 현재 migrationId와 함께 오류 이력에 남긴다
+    public void reportError(String code, String detail) {
+        String currentMigrationId;
+        lock.lock();
+        try {
+            currentMigrationId = migrationId;
+        } finally {
+            lock.unlock();
+        }
+        eventPublisher.publishEvent(new MigrationErrorEvent(code, detail, currentMigrationId));
     }
 
     public WritePhase phase() {
@@ -529,6 +558,12 @@ public class MigrationWriteGate implements TransactionWriteObserver {
             if (age.compareTo(limit) >= 0 && stuckWarnedTicketIds.add(ticket.id())) {
                 log.warn("migration_ticket_stuck ticket_id={} type={} description={} thread={} age_ms={}",
                         ticket.id(), ticket.type(), ticket.description(), ticket.threadName(), age.toMillis());
+                // 오류 이력은 Gate를 다시 호출하지 않으므로 lock 안에서 발행해도 된다
+                eventPublisher.publishEvent(new MigrationErrorEvent(
+                        "migration_ticket_stuck",
+                        ticket.type() + " " + ticket.description() + " thread=" + ticket.threadName()
+                                + " age_ms=" + age.toMillis(),
+                        migrationId));
             }
         }
     }
