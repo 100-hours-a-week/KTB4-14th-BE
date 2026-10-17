@@ -9,6 +9,7 @@ import jakarta.validation.Valid;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -38,6 +39,18 @@ public class TravelPlanV2Controller {
         return ApiResponse.of(
                 "여행 생성 요청",
                 generationService.create(currentUser.id(), request)
+        );
+    }
+
+    @PostMapping({"/{travelPlanId}/regenerate", "/{travelPlanId}/regeneration"})
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public ApiResponse<TravelPlanCreatedResponse> regenerate(
+            @PathVariable Long travelPlanId,
+            @Valid @RequestBody(required = false) TravelPlanRequest request
+    ) {
+        return ApiResponse.of(
+                "여행 재생성 요청",
+                generationService.regenerate(currentUser.id(), travelPlanId, request)
         );
     }
 }
