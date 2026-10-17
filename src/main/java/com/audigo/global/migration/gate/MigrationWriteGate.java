@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.locks.Condition;
+import java.util.function.BooleanSupplier;
 import java.util.concurrent.locks.ReentrantLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -65,6 +66,8 @@ public class MigrationWriteGate implements TransactionWriteObserver {
     private Instant openedAt;
     private boolean aiStartDeferred;
     private Instant aiStartDeferredAt;
+    // Hold 판정을 받고 아직 보류 큐에 들어가지 않은 요청 수. RESUMING → OPEN 판정에서 놓치지 않기 위해 센다
+    private int holdsInProgress;
 
     @Autowired
     public MigrationWriteGate(MigrationProperties properties, ApplicationEventPublisher eventPublisher) {
@@ -100,6 +103,7 @@ public class MigrationWriteGate implements TransactionWriteObserver {
             if (phase == WritePhase.OPEN) {
                 return new Admission.Admitted(openTicket(type, description, null));
             }
+            holdsInProgress++;
             return HOLD;
         } finally {
             lock.unlock();
@@ -122,6 +126,18 @@ public class MigrationWriteGate implements TransactionWriteObserver {
                 return new AiJobStart.Deferred();
             }
             return new AiJobStart.Run(openTicket(WorkType.AI_JOB, description, parent == null ? null : parent.id()));
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    // Hold 판정을 받은 요청이 보류 큐에 들어갔거나(또는 거부됐거나) 끝났음을 알린다. Hold마다 정확히 한 번 호출한다
+    public void finishHold() {
+        lock.lock();
+        try {
+            if (holdsInProgress > 0) {
+                holdsInProgress--;
+            }
         } finally {
             lock.unlock();
         }
@@ -321,13 +337,20 @@ public class MigrationWriteGate implements TransactionWriteObserver {
         }
     }
 
-    // 보류 큐가 빈 뒤 RESUMING → OPEN. 06에서 lock 안의 큐 크기 재확인을 추가한다.
-    // OPEN 도달과 같은 임계 구역에서 AI 시작 지연을 끄고 지연 작업의 티켓을 연 뒤, lock 밖에서 제출 이벤트를 발행한다
+    // 보류 큐가 없는 호출용. 운영 경로는 PendingWriteDispatcher가 큐 확인과 함께 호출한다
     public boolean tryCompleteResume() {
+        return tryCompleteResume(() -> true);
+    }
+
+    // RESUMING → OPEN. 입장 판정과 같은 lock 안에서 '큐에 들어가는 중인 요청 0 + 보류 큐 비었음'을 다시 확인하므로
+    // 큐가 비었다고 본 순간 새로 보류된 요청이 OPEN 전이 뒤에 남지 않는다.
+    // OPEN 도달과 같은 임계 구역에서 AI 시작 지연을 끄고 지연 작업의 티켓을 연 뒤, lock 밖에서 제출 이벤트를 발행한다
+    public boolean tryCompleteResume(BooleanSupplier pendingQueueEmpty) {
+        Objects.requireNonNull(pendingQueueEmpty, "pendingQueueEmpty");
         List<ReleasedAiJob> released;
         lock.lock();
         try {
-            if (phase != WritePhase.RESUMING) {
+            if (phase != WritePhase.RESUMING || holdsInProgress > 0 || !pendingQueueEmpty.getAsBoolean()) {
                 return false;
             }
             openedAt = now();
