@@ -3,10 +3,14 @@ package com.audigo.domain.travel.service;
 import com.audigo.domain.notification.service.NotificationService;
 import com.audigo.domain.travel.dto.TravelGenerationStatusResponse;
 import com.audigo.domain.travel.entity.TravelGenerationJob;
+import com.audigo.domain.travel.entity.TravelGenerationExecutionStatus;
 import com.audigo.domain.travel.entity.TravelGenerationStage;
 import com.audigo.domain.travel.entity.TravelGenerationStageState;
 import com.audigo.domain.travel.entity.TravelPlan;
 import com.audigo.domain.travel.entity.TravelPlanStatus;
+import com.audigo.domain.travel.messaging.TravelGenerationMessageVersion;
+import com.audigo.domain.travel.messaging.TravelGenerationResultMessage;
+import com.audigo.domain.travel.messaging.TravelGenerationResultType;
 import com.audigo.domain.travel.repository.TravelGenerationJobRepository;
 import com.audigo.global.error.BusinessException;
 import com.audigo.global.error.ErrorCode;
@@ -143,6 +147,59 @@ public class TravelGenerationJobService {
     }
 
     @Transactional
+    public void handleResultMessage(TravelGenerationResultMessage message) {
+        if (!TravelGenerationMessageVersion.V1.equals(message.messageVersion())) {
+            throw new IllegalArgumentException("지원하지 않는 여행 생성 결과 메시지 버전입니다.");
+        }
+        TravelGenerationJob job = getJobForUpdate(message.generationJobId());
+        if (job.getStatus() != TravelPlanStatus.GENERATING) {
+            return;
+        }
+
+        markStartedIfQueued(job);
+        log.info(
+                "travel_generation_result event_id={} job_id={} type={} stage={} state={}",
+                message.eventId(),
+                message.generationJobId(),
+                message.type(),
+                message.stage(),
+                message.state()
+        );
+
+        if (message.type() == TravelGenerationResultType.FAILED) {
+            markFailed(job, message.errorMessage());
+            return;
+        }
+        if (message.type() == TravelGenerationResultType.COMPLETED) {
+            String payload = message.payload().toString();
+            if (!hasItineraryResult(payload)) {
+                throw new IllegalArgumentException("완료 메시지에 유효한 여행 일정이 없습니다.");
+            }
+            markResultStagesDone(job, payload);
+            if (!completeIfReady(job)) {
+                throw new IllegalStateException("여행 생성 결과를 일정으로 저장하지 못했습니다.");
+            }
+            return;
+        }
+
+        if (message.state() == TravelGenerationStageState.FAILED) {
+            markFailed(job, "AI 서버가 여행 생성 단계 처리에 실패했습니다.");
+            return;
+        }
+        updateProgressMonotonically(job.getId(), message);
+    }
+
+    private void markStartedIfQueued(TravelGenerationJob job) {
+        if (job.getExecutionStatus() != TravelGenerationExecutionStatus.QUEUED) {
+            return;
+        }
+        job.markStarted();
+        job.getTravelPlan().restartGeneration();
+        progressStore.initialize(job.getId());
+        jobRepository.save(job);
+    }
+
+    @Transactional
     public void finishStream(Long jobId) {
         TravelGenerationJob job = getJob(jobId);
         if (job.getStatus() != TravelPlanStatus.GENERATING) {
@@ -204,6 +261,35 @@ public class TravelGenerationJobService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.VALIDATION_FAILED));
     }
 
+    private TravelGenerationJob getJobForUpdate(Long jobId) {
+        return jobRepository.findByIdForUpdate(jobId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.VALIDATION_FAILED));
+    }
+
+    private void updateProgressMonotonically(Long jobId, TravelGenerationResultMessage message) {
+        TravelGenerationStageState current = progressStore.states(jobId).get(message.stage());
+        if (progressRank(message.state()) < progressRank(current)) {
+            return;
+        }
+        progressStore.update(
+                jobId,
+                message.stage(),
+                message.state(),
+                message.payload() == null ? null : message.payload().toString()
+        );
+    }
+
+    private int progressRank(TravelGenerationStageState state) {
+        if (state == null) {
+            return -1;
+        }
+        return switch (state) {
+            case PENDING -> 0;
+            case RUNNING -> 1;
+            case DONE, FAILED -> 2;
+        };
+    }
+
     private boolean isStageOrderValid(Long jobId, TravelGenerationStage stage) {
         Map<TravelGenerationStage, TravelGenerationStageState> states = progressStore.states(jobId);
         return switch (stage) {
@@ -215,17 +301,17 @@ public class TravelGenerationJobService {
         };
     }
 
-    private void completeIfReady(TravelGenerationJob job) {
+    private boolean completeIfReady(TravelGenerationJob job) {
         Map<TravelGenerationStage, TravelGenerationStageState> states = progressStore.states(job.getId());
         boolean ready = REQUIRED_STAGES.stream()
                 .allMatch(stage -> states.get(stage) == TravelGenerationStageState.DONE);
         if (!ready) {
-            return;
+            return false;
         }
         if (!itineraryPersistenceService.persistIfPresent(job)) {
             // 단계 이벤트가 모두 도착해도 최종 COMPLETE 이벤트가 안 올수있다
             // 스트림이 실제로 종료된 경우의 실패 처리는 finishStream()에서 담당
-            return;
+            return false;
         }
         job.complete();
         TravelPlan travelPlan = job.getTravelPlan();
@@ -241,6 +327,7 @@ public class TravelGenerationJobService {
                 travelPlan.getId(),
                 travelPlan.getRegion().getFullName() + " 여행 일정이 완성됐어요."
         );
+        return true;
     }
 
     private void markResultStagesDone(TravelGenerationJob job, String payload) {
