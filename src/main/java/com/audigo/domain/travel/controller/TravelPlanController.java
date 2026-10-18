@@ -7,7 +7,6 @@ import com.audigo.domain.travel.entity.TravelPlan;
 import com.audigo.domain.travel.service.TravelPlanService;
 import com.audigo.domain.travel.service.TravelGenerationOrchestrator;
 import com.audigo.domain.travel.dto.TravelGenerationStatusResponse;
-import com.audigo.global.migration.classify.PureRead;
 import com.audigo.global.response.ApiResponse;
 import com.audigo.global.security.CurrentUser;
 import jakarta.validation.Valid;
@@ -53,7 +52,6 @@ public class TravelPlanController {
         );
     }
 
-    @PureRead(reason = "readOnly 트랜잭션 조회")
     @GetMapping("/upcoming")
     public ApiResponse<TravelSummaryResponse> getUpcomingTravel() {
         return ApiResponse.of(
@@ -62,7 +60,6 @@ public class TravelPlanController {
         );
     }
 
-    @PureRead(reason = "readOnly 트랜잭션 조회")
     @GetMapping("/recent")
     public ApiResponse<List<TravelSummaryResponse>> getRecentTravels() {
         return ApiResponse.of(
@@ -71,7 +68,6 @@ public class TravelPlanController {
         );
     }
 
-    @PureRead(reason = "readOnly 트랜잭션 조회")
     @GetMapping("/me")
     public ApiResponse<List<TravelSummaryResponse>> getMyTravels() {
         return ApiResponse.of(
@@ -90,7 +86,6 @@ public class TravelPlanController {
         );
     }
 
-    @PureRead(reason = "readOnly 트랜잭션 + 메모리 진행 상태 조회")
     @GetMapping({"/{travelPlanId}/status", "/{travelPlanId}"})
     public ApiResponse<TravelGenerationStatusResponse> getGenerationStatus(
             @PathVariable Long travelPlanId

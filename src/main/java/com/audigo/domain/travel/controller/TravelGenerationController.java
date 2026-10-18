@@ -2,7 +2,6 @@ package com.audigo.domain.travel.controller;
 
 import com.audigo.domain.travel.dto.TravelGenerationStatusResponse;
 import com.audigo.domain.travel.service.TravelGenerationOrchestrator;
-import com.audigo.global.migration.classify.PureRead;
 import com.audigo.global.response.ApiResponse;
 import com.audigo.global.security.CurrentUser;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -22,7 +21,6 @@ public class TravelGenerationController {
         this.generationOrchestrator = generationOrchestrator;
     }
 
-    @PureRead(reason = "readOnly 트랜잭션 + 메모리 진행 상태 조회")
     @GetMapping("/{generationJobId}")
     public ApiResponse<TravelGenerationStatusResponse> getStatus(@PathVariable Long generationJobId) {
         return ApiResponse.of(

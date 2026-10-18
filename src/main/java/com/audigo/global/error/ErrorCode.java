@@ -30,17 +30,8 @@ public enum ErrorCode {
     VALIDATION_FAILED(HttpStatus.UNPROCESSABLE_ENTITY, "validation_failed"),
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "internal_server_error"),
     EXTERNAL_API_ERROR(HttpStatus.BAD_GATEWAY, "external_api_error"),
-    SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "service_unavailable"),
-    MIGRATION_HOLD_TIMEOUT(HttpStatus.SERVICE_UNAVAILABLE, "migration_hold_timeout"),
-    MIGRATION_PENDING_QUEUE_FULL(HttpStatus.SERVICE_UNAVAILABLE, "migration_pending_queue_full"),
-    MIGRATION_DISABLED(HttpStatus.FORBIDDEN, "migration_disabled"),
-    MIGRATION_STALE_COMMAND(HttpStatus.CONFLICT, "migration_stale_command"),
-    MIGRATION_ID_MISMATCH(HttpStatus.CONFLICT, "migration_id_mismatch"),
-    MIGRATION_ATTEMPT_IN_PROGRESS(HttpStatus.CONFLICT, "migration_attempt_in_progress"),
-    MIGRATION_INVALID_PHASE(HttpStatus.CONFLICT, "migration_invalid_phase"),
-    MIGRATION_REMAINING_WORK(HttpStatus.CONFLICT, "migration_remaining_work"),
-    MIGRATION_RESUME_TARGET_REQUIRED(HttpStatus.BAD_REQUEST, "migration_resume_target_required"),
-    CHAT_MESSAGE_RATE_LIMIT_EXCEEDED(HttpStatus.TOO_MANY_REQUESTS, "chat_message_rate_limit_exceeded");
+    CHAT_MESSAGE_RATE_LIMIT_EXCEEDED(HttpStatus.TOO_MANY_REQUESTS, "chat_message_rate_limit_exceeded"),
+    SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "service_unavailable");
 
     private final HttpStatus status;
     private final String message;
