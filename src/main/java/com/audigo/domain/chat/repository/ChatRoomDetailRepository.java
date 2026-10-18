@@ -115,6 +115,52 @@ public class ChatRoomDetailRepository {
         return rows.stream().map(this::toMessageDetailRow).toList();
     }
 
+    public Optional<MessageDetailRow> findMessage(Long roomId, Long userId, Long opponentUserId, Long chatId) {
+        List<Object[]> rows = entityManager.createNativeQuery("""
+                SELECT m.id, m.sender_id, m.content, m.sent_at,
+                       CASE WHEN EXISTS (
+                           SELECT 1 FROM chat_message_reads r
+                           WHERE r.message_id = m.id
+                             AND r.user_id = CASE WHEN m.sender_id = :userId THEN :opponentUserId ELSE :userId END
+                       ) THEN 1 ELSE 0 END, m.message_seq
+                FROM chat_messages m
+                WHERE m.id = :chatId AND m.chat_room_id = :roomId AND m.status = 'SENT'
+                """)
+                .setParameter("roomId", roomId)
+                .setParameter("userId", userId)
+                .setParameter("opponentUserId", opponentUserId)
+                .setParameter("chatId", chatId)
+                .setMaxResults(1)
+                .getResultList();
+        return rows.stream().findFirst().map(this::toMessageDetailRow);
+    }
+
+    public List<MessageDetailRow> findNewerMessages(
+            Long roomId, Long userId, Long opponentUserId, LocalDateTime anchorTime, Long anchorId, int limit
+    ) {
+        @SuppressWarnings("unchecked")
+        List<Object[]> rows = entityManager.createNativeQuery("""
+                SELECT m.id, m.sender_id, m.content, m.sent_at,
+                       CASE WHEN EXISTS (
+                           SELECT 1 FROM chat_message_reads r
+                           WHERE r.message_id = m.id
+                             AND r.user_id = CASE WHEN m.sender_id = :userId THEN :opponentUserId ELSE :userId END
+                       ) THEN 1 ELSE 0 END, m.message_seq
+                FROM chat_messages m
+                WHERE m.chat_room_id = :roomId AND m.status = 'SENT'
+                  AND (m.sent_at > :anchorTime OR (m.sent_at = :anchorTime AND m.id > :anchorId))
+                ORDER BY m.sent_at ASC, m.id ASC
+                """)
+                .setParameter("roomId", roomId)
+                .setParameter("userId", userId)
+                .setParameter("opponentUserId", opponentUserId)
+                .setParameter("anchorTime", anchorTime)
+                .setParameter("anchorId", anchorId)
+                .setMaxResults(limit)
+                .getResultList();
+        return rows.stream().map(this::toMessageDetailRow).toList();
+    }
+
     private MessageDetailRow toMessageDetailRow(Object[] row) {
         return new MessageDetailRow(
                 ((Number) row[0]).longValue(),
