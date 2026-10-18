@@ -23,7 +23,7 @@ public class TravelGenerationOrchestrator {
     private final TravelGenerationRequestFactory requestFactory;
     private final TravelGenerationContextStore contextStore;
     private final TravelGenerationProgressStore progressStore;
-    private final TravelGenerationLauncher launcher;
+    private final TravelGenerationWorker worker;
 
     public TravelGenerationOrchestrator(
             TravelPlanRepository travelPlanRepository,
@@ -31,14 +31,14 @@ public class TravelGenerationOrchestrator {
             TravelGenerationRequestFactory requestFactory,
             TravelGenerationContextStore contextStore,
             TravelGenerationProgressStore progressStore,
-            TravelGenerationLauncher launcher
+            TravelGenerationWorker worker
     ) {
         this.travelPlanRepository = travelPlanRepository;
         this.jobService = jobService;
         this.requestFactory = requestFactory;
         this.contextStore = contextStore;
         this.progressStore = progressStore;
-        this.launcher = launcher;
+        this.worker = worker;
     }
 
     @Transactional
@@ -79,7 +79,7 @@ public class TravelGenerationOrchestrator {
             jobService.markFailed(job.getId(), "AI 생성에 필요한 장소 정보를 불러오지 못했습니다.");
             return job.getId();
         }
-        launcher.launch(job.getId());
+        worker.run(job.getId());
         return job.getId();
     }
 }

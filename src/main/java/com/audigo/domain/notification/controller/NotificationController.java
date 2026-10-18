@@ -6,7 +6,6 @@ import com.audigo.domain.notification.dto.ReadNotificationsRequest;
 import com.audigo.domain.notification.dto.UnreadCountResponse;
 import com.audigo.domain.notification.dto.UpdateNotificationSettingsRequest;
 import com.audigo.domain.notification.service.NotificationService;
-import com.audigo.global.migration.classify.PureRead;
 import com.audigo.global.response.ApiResponse;
 import com.audigo.global.security.CurrentUser;
 import jakarta.validation.Valid;
@@ -32,19 +31,16 @@ public class NotificationController {
         this.notificationService = notificationService;
     }
 
-    @PureRead(reason = "readOnly 트랜잭션 조회")
     @GetMapping("/api/notifications")
     public ApiResponse<List<NotificationResponse>> list() {
         return ApiResponse.of("notifications_found", notificationService.list(currentUser.id()));
     }
 
-    @PureRead(reason = "readOnly 트랜잭션 조회")
     @GetMapping("/api/notifications/unread-count")
     public ApiResponse<UnreadCountResponse> unreadCount() {
         return ApiResponse.of("notification_unread_count_found", notificationService.unreadCount(currentUser.id()));
     }
 
-    @PureRead(reason = "DB 접근 없이 메모리 SSE emitter 등록")
     @GetMapping(value = "/api/notifications/subscribe", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter subscribe() {
         return notificationService.subscribe(currentUser.id());
@@ -68,7 +64,6 @@ public class NotificationController {
         return ResponseEntity.noContent().build();
     }
 
-    @PureRead(reason = "readOnly 트랜잭션 조회. 설정이 없으면 저장하지 않고 기본값 반환")
     @GetMapping("/api/notification-settings")
     public ApiResponse<NotificationSettingsResponse> getSettings() {
         return ApiResponse.of("notification_settings_found", notificationService.getSettings(currentUser.id()));

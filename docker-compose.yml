@@ -12,23 +12,9 @@ services:
       - "3306:3306"
     volumes:
       - audigo-mysql-data:/var/lib/mysql
-      - ./infra/mysql/init:/docker-entrypoint-initdb.d:ro
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
-      # ProxySQL 백엔드 인증용
-      - --mysql-native-password=ON
-
-  proxysql:
-    image: proxysql/proxysql:2.7.1
-    container_name: audigo-proxysql
-    depends_on:
-      - mysql
-    ports:
-      - "6033:6033"
-      - "6032:6032"
-    volumes:
-      - ./infra/proxysql/proxysql.cnf:/etc/proxysql.cnf:ro
 
 volumes:
   audigo-mysql-data:

@@ -4,7 +4,6 @@ import com.audigo.domain.user.dto.MyPageResponse;
 import com.audigo.domain.user.dto.UpdateNicknameRequest;
 import com.audigo.domain.user.dto.UpdateNicknameResponse;
 import com.audigo.domain.user.service.UserService;
-import com.audigo.global.migration.classify.PureRead;
 import com.audigo.global.response.ApiResponse;
 import com.audigo.global.security.CurrentUser;
 import jakarta.validation.Valid;
@@ -26,7 +25,6 @@ public class UserController {
         this.userService = userService;
     }
 
-    @PureRead(reason = "readOnly 트랜잭션 조회")
     @GetMapping("/me")
     public ApiResponse<MyPageResponse> getMe() {
         return ApiResponse.of("my_page_found", userService.getMyPage(currentUser.id()));

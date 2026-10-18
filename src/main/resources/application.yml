@@ -13,9 +13,6 @@ spring:
       maximum-pool-size: ${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:20}
       minimum-idle: ${SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE:5}
       connection-timeout: ${SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT:30000}
-      # ProxySQL·MySQL wait_timeout보다 짧게 유지해 끊긴 커넥션 재사용을 막는다
-      max-lifetime: ${SPRING_DATASOURCE_HIKARI_MAX_LIFETIME:1500000}
-      keepalive-time: ${SPRING_DATASOURCE_HIKARI_KEEPALIVE_TIME:300000}
 
   jpa:
     hibernate:
@@ -90,13 +87,3 @@ sentry:
   dsn: ${SENTRY_DSN:}
   environment: ${SPRING_PROFILES_ACTIVE:local}
   traces-sample-rate: 0.1
-
-  migration:
-    enabled: ${AUDIGO_MIGRATION_ENABLED:false}
-    instance-id: ${AUDIGO_INSTANCE_ID:${HOSTNAME:local}}
-    admin-key: ${AUDIGO_MIGRATION_ADMIN_KEY:}
-    hold-timeout: ${AUDIGO_MIGRATION_HOLD_TIMEOUT:50s}
-    pending-capacity: ${AUDIGO_MIGRATION_PENDING_CAPACITY:1000}
-    resume-max-concurrency: ${AUDIGO_MIGRATION_RESUME_CONCURRENCY:4}
-    drain-timeout: ${AUDIGO_MIGRATION_DRAIN_TIMEOUT:360s}
-    error-history-size: ${AUDIGO_MIGRATION_ERROR_HISTORY_SIZE:100}

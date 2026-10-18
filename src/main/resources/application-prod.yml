@@ -4,8 +4,6 @@ spring:
       on-profile: prod
 
   datasource:
-    # DB 주소는 ProxySQL로 고정한다. 컷오버 시에는 ProxySQL의 목적지만 변경한다
-    # 예: jdbc:mysql://<proxysql-host>:6033/audigo?useLocalSessionState=true&useLocalTransactionState=true&cacheServerConfiguration=true
     url: ${DB_URL}
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
@@ -13,11 +11,6 @@ spring:
   jpa:
     hibernate:
       ddl-auto: validate
-
-  # 기동 시 data.sql을 실행하지 않는다. 지역 seed는 운영 DB에 이미 있고 DMS로 복제된다
-  sql:
-    init:
-      mode: never
 
 audigo:
   cors:
