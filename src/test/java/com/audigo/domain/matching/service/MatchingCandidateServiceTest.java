@@ -18,6 +18,7 @@ import com.audigo.domain.matching.entity.MatchConnectionStatus;
 import com.audigo.domain.matching.entity.MatchingGender;
 import com.audigo.domain.matching.entity.MatchingProfile;
 import com.audigo.domain.matching.entity.MatchingRequest;
+import com.audigo.domain.matching.entity.MatchingRequestStatus;
 import com.audigo.domain.matching.entity.PreferredCompanionGender;
 import com.audigo.domain.matching.repository.MatchConnectionRepository;
 import com.audigo.domain.matching.repository.MatchingProfileRepository;
@@ -73,7 +74,8 @@ class MatchingCandidateServiceTest {
                         89
                 )
         ));
-        when(matchingRequestRepository.findByRequester_Id(1L)).thenReturn(Optional.of(matchingRequest));
+        when(matchingRequestRepository.findByRequester_IdAndStatus(1L, MatchingRequestStatus.ACTIVE))
+                .thenReturn(Optional.of(matchingRequest));
         when(matchingProfileRepository.findActiveProfilesExceptUser(1L)).thenReturn(List.of(candidateProfile));
         when(matchingAiClient.getCandidates(any(MatchingCandidateAiRequest.class))).thenReturn(aiResponse);
 
@@ -100,7 +102,8 @@ class MatchingCandidateServiceTest {
 
     @Test
     void rejects_candidates_when_matching_request_not_found() {
-        when(matchingRequestRepository.findByRequester_Id(1L)).thenReturn(Optional.empty());
+        when(matchingRequestRepository.findByRequester_IdAndStatus(1L, MatchingRequestStatus.ACTIVE))
+                .thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> matchingCandidateService.getCandidates(1L))
                 .isInstanceOfSatisfying(BusinessException.class, exception ->
@@ -112,7 +115,10 @@ class MatchingCandidateServiceTest {
     void responds_candidate_and_creates_match_connection() {
         MatchingRequest matchingRequest = matchingRequest();
         User targetUser = activeUser(22L, "매칭후보");
-        when(matchingRequestRepository.findByRequesterIdForUpdate(1L)).thenReturn(Optional.of(matchingRequest));
+        when(matchingRequestRepository.findFirstByRequester_IdAndStatusInOrderByIdDesc(
+                1L,
+                List.of(MatchingRequestStatus.ACTIVE, MatchingRequestStatus.CONNECTED)
+        )).thenReturn(Optional.of(matchingRequest));
         when(userRepository.findById(22L)).thenReturn(Optional.of(targetUser));
         when(matchConnectionRepository.findByMatchingRequest_IdAndTargetUser_IdAndStatus(
                 10L,
@@ -134,6 +140,8 @@ class MatchingCandidateServiceTest {
         assertThat(response.matchingRequestId()).isEqualTo(10L);
         assertThat(response.targetUserId()).isEqualTo(22L);
         assertThat(response.status()).isEqualTo(MatchConnectionStatus.ACTIVE);
+        assertThat(matchingRequest.getStatus()).isEqualTo(MatchingRequestStatus.CONNECTED);
+        assertThat(matchingRequest.getEndedAt()).isNotNull();
         verify(matchConnectionRepository).save(any(MatchConnection.class));
         verify(notificationService).notifyMatchSuccess(
                 1L,
@@ -153,7 +161,11 @@ class MatchingCandidateServiceTest {
         User targetUser = activeUser(22L, "매칭후보");
         MatchConnection existing = MatchConnection.create(matchingRequest, targetUser);
         ReflectionTestUtils.setField(existing, "id", 30L);
-        when(matchingRequestRepository.findByRequesterIdForUpdate(1L)).thenReturn(Optional.of(matchingRequest));
+        matchingRequest.markConnected();
+        when(matchingRequestRepository.findFirstByRequester_IdAndStatusInOrderByIdDesc(
+                1L,
+                List.of(MatchingRequestStatus.ACTIVE, MatchingRequestStatus.CONNECTED)
+        )).thenReturn(Optional.of(matchingRequest));
         when(userRepository.findById(22L)).thenReturn(Optional.of(targetUser));
         when(matchConnectionRepository.findByMatchingRequest_IdAndTargetUser_IdAndStatus(
                 10L,
@@ -168,13 +180,17 @@ class MatchingCandidateServiceTest {
 
         assertThat(response.matchConnectionId()).isEqualTo(30L);
         assertThat(response.status()).isEqualTo(MatchConnectionStatus.ACTIVE);
+        assertThat(matchingRequest.getStatus()).isEqualTo(MatchingRequestStatus.CONNECTED);
         verify(matchConnectionRepository, never()).save(any(MatchConnection.class));
         verify(notificationService, never()).notifyMatchSuccess(any(), any(), any());
     }
 
     @Test
     void rejects_response_when_matching_request_not_found() {
-        when(matchingRequestRepository.findByRequesterIdForUpdate(1L)).thenReturn(Optional.empty());
+        when(matchingRequestRepository.findFirstByRequester_IdAndStatusInOrderByIdDesc(
+                1L,
+                List.of(MatchingRequestStatus.ACTIVE, MatchingRequestStatus.CONNECTED)
+        )).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> matchingCandidateService.respondCandidate(1L, new CreateMatchConnectionRequest(22L)))
                 .isInstanceOfSatisfying(BusinessException.class, exception ->
@@ -185,7 +201,10 @@ class MatchingCandidateServiceTest {
     @Test
     void rejects_response_when_target_user_is_self() {
         MatchingRequest matchingRequest = matchingRequest();
-        when(matchingRequestRepository.findByRequesterIdForUpdate(1L)).thenReturn(Optional.of(matchingRequest));
+        when(matchingRequestRepository.findFirstByRequester_IdAndStatusInOrderByIdDesc(
+                1L,
+                List.of(MatchingRequestStatus.ACTIVE, MatchingRequestStatus.CONNECTED)
+        )).thenReturn(Optional.of(matchingRequest));
         when(userRepository.findById(1L)).thenReturn(Optional.of(activeUser(1L, "윤혁")));
 
         assertThatThrownBy(() -> matchingCandidateService.respondCandidate(1L, new CreateMatchConnectionRequest(1L)))
