@@ -7,6 +7,8 @@ import com.audigo.domain.notification.dto.NotificationSettingsResponse;
 import com.audigo.domain.notification.dto.ReadNotificationsRequest;
 import com.audigo.domain.notification.dto.UnreadCountResponse;
 import com.audigo.domain.notification.dto.UpdateNotificationSettingsRequest;
+import com.audigo.domain.notification.dto.V2NotificationSettingsResponse;
+import com.audigo.domain.notification.dto.V2UpdateNotificationSettingsRequest;
 import com.audigo.domain.notification.entity.Notification;
 import com.audigo.domain.notification.entity.NotificationSetting;
 import com.audigo.domain.notification.entity.NotificationTargetType;
@@ -99,6 +101,23 @@ public class NotificationService {
         return NotificationSettingsResponse.from(setting);
     }
 
+    @Transactional
+    public V2NotificationSettingsResponse getV2Settings(Long userId) {
+        return V2NotificationSettingsResponse.from(findOrCreateSettings(userId));
+    }
+
+    @Transactional
+    public V2NotificationSettingsResponse updateV2Settings(Long userId, V2UpdateNotificationSettingsRequest request) {
+        NotificationSetting setting = findOrCreateSettings(userId);
+        setting.updateV2(
+                resolve(request.matchSuccessEnabled(), null, setting.matchSuccessEnabled()),
+                resolve(request.chatEnabled(), null, setting.chatEnabled()),
+                resolve(request.travelCompleteEnabled(), null, setting.travelCompleteEnabled()),
+                resolve(request.notificationEnabled(), null, setting.notificationEnabled())
+        );
+        return V2NotificationSettingsResponse.from(setting);
+    }
+
     public SseEmitter subscribe(Long userId) {
         return notificationSseService.subscribe(userId);
     }
@@ -161,6 +180,7 @@ public class NotificationService {
     }
 
     @Transactional
+    @Deprecated(forRemoval = false)
     public NotificationCreateResult notifyTravelBefore(Long userId, Long travelPlanId, String content) {
         return create(new CreateNotificationCommand(
                 userId,
