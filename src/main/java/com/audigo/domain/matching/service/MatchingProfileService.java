@@ -11,6 +11,7 @@ import com.audigo.global.error.BusinessException;
 import com.audigo.global.error.ErrorCode;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -39,15 +40,20 @@ public class MatchingProfileService {
     public MatchingProfileResponse updateMyProfile(Long userId, UpdateMatchingProfileRequest request) {
         validate(request);
         User user = findActiveUser(userId);
-        MatchingProfile profile = matchingProfileRepository.findByUser_Id(userId)
-                .orElseGet(() -> MatchingProfile.create(
-                        user,
-                        request.active(),
-                        request.gender(),
-                        request.pace(),
-                        request.themes()
-                ));
-        profile.update(request.active(), request.gender(), request.pace(), request.themes());
+        Optional<MatchingProfile> existingProfile = matchingProfileRepository.findByUser_Id(userId);
+        MatchingProfile profile;
+        if (existingProfile.isPresent()) {
+            profile = existingProfile.get();
+            profile.update(request.active(), request.gender(), request.pace(), request.themes());
+        } else {
+            profile = MatchingProfile.create(
+                    user,
+                    request.active(),
+                    request.gender(),
+                    request.pace(),
+                    request.themes()
+            );
+        }
         return MatchingProfileResponse.from(matchingProfileRepository.save(profile));
     }
 
