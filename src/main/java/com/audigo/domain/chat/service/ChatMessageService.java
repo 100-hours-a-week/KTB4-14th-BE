@@ -13,6 +13,7 @@ import com.audigo.domain.chat.entity.ChatRoomStatus;
 import com.audigo.domain.chat.repository.ChatMessageRepository;
 import com.audigo.domain.chat.repository.ChatRoomMemberRepository;
 import com.audigo.domain.chat.repository.ChatRoomRepository;
+import com.audigo.domain.notification.service.NotificationService;
 import com.audigo.domain.user.entity.User;
 import com.audigo.domain.user.repository.UserRepository;
 import com.audigo.global.error.BusinessException;
@@ -47,19 +48,22 @@ public class ChatMessageService {
     private final ChatMessageRepository chatMessageRepository;
     private final UserRepository userRepository;
     private final SimpMessagingTemplate messagingTemplate;
+    private final NotificationService notificationService;
 
     public ChatMessageService(
             ChatRoomRepository chatRoomRepository,
             ChatRoomMemberRepository chatRoomMemberRepository,
             ChatMessageRepository chatMessageRepository,
             UserRepository userRepository,
-            SimpMessagingTemplate messagingTemplate
+            SimpMessagingTemplate messagingTemplate,
+            NotificationService notificationService
     ) {
         this.chatRoomRepository = chatRoomRepository;
         this.chatRoomMemberRepository = chatRoomMemberRepository;
         this.chatMessageRepository = chatMessageRepository;
         this.userRepository = userRepository;
         this.messagingTemplate = messagingTemplate;
+        this.notificationService = notificationService;
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -108,6 +112,11 @@ public class ChatMessageService {
 
         LocalDateTime sentAt = LocalDateTime.now(ZoneOffset.UTC);
         enforceRateLimit(userId, sentAt);
+        boolean shouldNotifyRecipient = chatMessageRepository.countUnreadMessages(
+                roomId,
+                recipientUserId,
+                ChatMessageStatus.SENT
+        ) == 0;
 
         long messageSequence = room.recordMessage(sentAt);
         ChatMessage message = chatMessageRepository.saveAndFlush(ChatMessage.create(
@@ -119,7 +128,7 @@ public class ChatMessageService {
                 sentAt
         ));
         ChatMessageResponse response = toResponse(message);
-        publishAfterCommit(recipientUserId, response);
+        publishAfterCommit(recipientUserId, sender.nickname(), response, shouldNotifyRecipient);
         return new SendResult(response, true);
     }
 
@@ -168,28 +177,66 @@ public class ChatMessageService {
         throw new RateLimitExceededException(retryAfterSeconds);
     }
 
-    private void publishAfterCommit(Long recipientUserId, ChatMessageResponse response) {
+    private void publishAfterCommit(
+            Long recipientUserId,
+            String senderNickname,
+            ChatMessageResponse response,
+            boolean shouldNotifyRecipient
+    ) {
         ChatMessageRealtimeEvent event = ChatMessageRealtimeEvent.messageCreated(response);
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
-                try {
-                    messagingTemplate.convertAndSendToUser(
-                            recipientUserId.toString(),
-                            RECIPIENT_DESTINATION,
-                            event
-                    );
-                } catch (RuntimeException exception) {
-                    log.warn(
-                            "chat_message_realtime_publish_failed room_id={} message_id={} recipient_id={}",
-                            response.roomId(),
-                            response.messageId(),
-                            recipientUserId,
-                            exception
-                    );
+                publishRealtimeMessage(recipientUserId, response, event);
+                if (shouldNotifyRecipient) {
+                    createNewMessageNotification(recipientUserId, senderNickname, response);
                 }
             }
         });
+    }
+
+    private void publishRealtimeMessage(
+            Long recipientUserId,
+            ChatMessageResponse response,
+            ChatMessageRealtimeEvent event
+    ) {
+        try {
+            messagingTemplate.convertAndSendToUser(
+                    recipientUserId.toString(),
+                    RECIPIENT_DESTINATION,
+                    event
+            );
+        } catch (RuntimeException exception) {
+            log.warn(
+                    "chat_message_realtime_publish_failed room_id={} message_id={} recipient_id={}",
+                    response.roomId(),
+                    response.messageId(),
+                    recipientUserId,
+                    exception
+            );
+        }
+    }
+
+    private void createNewMessageNotification(
+            Long recipientUserId,
+            String senderNickname,
+            ChatMessageResponse response
+    ) {
+        try {
+            notificationService.notifyNewMessage(
+                    recipientUserId,
+                    response.roomId(),
+                    senderNickname + "님이 메시지를 보냈습니다"
+            );
+        } catch (RuntimeException exception) {
+            log.warn(
+                    "chat_message_notification_create_failed room_id={} message_id={} recipient_id={}",
+                    response.roomId(),
+                    response.messageId(),
+                    recipientUserId,
+                    exception
+            );
+        }
     }
 
     private ChatMessageResponse toResponse(ChatMessage message) {
