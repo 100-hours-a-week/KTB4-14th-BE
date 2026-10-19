@@ -32,6 +32,7 @@ import com.audigo.global.error.BusinessException;
 import com.audigo.global.error.ErrorCode;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -61,6 +62,9 @@ class MatchingCandidateServiceTest {
     @Mock
     private NotificationService notificationService;
 
+    @Mock
+    private MatchingAttemptService matchingAttemptService;
+
     @InjectMocks
     private MatchingCandidateService matchingCandidateService;
 
@@ -74,10 +78,14 @@ class MatchingCandidateServiceTest {
                         89
                 )
         ));
-        when(matchingRequestRepository.findByRequester_IdAndStatus(1L, MatchingRequestStatus.ACTIVE))
-                .thenReturn(Optional.of(matchingRequest));
+        when(matchingAttemptService.prepareInitial(1L)).thenReturn(
+                MatchingAttemptService.AttemptPreparation.started(40L, matchingRequest, Set.of())
+        );
         when(matchingProfileRepository.findActiveProfilesExceptUser(1L)).thenReturn(List.of(candidateProfile));
         when(matchingAiClient.getCandidates(any(MatchingCandidateAiRequest.class))).thenReturn(aiResponse);
+        when(matchingAttemptService.complete(any(), any())).thenReturn(
+                new MatchingAttemptService.AttemptResult(0, 3, true)
+        );
 
         MatchingCandidatesResponse response = matchingCandidateService.getCandidates(1L);
 
@@ -102,8 +110,8 @@ class MatchingCandidateServiceTest {
 
     @Test
     void rejects_candidates_when_matching_request_not_found() {
-        when(matchingRequestRepository.findByRequester_IdAndStatus(1L, MatchingRequestStatus.ACTIVE))
-                .thenReturn(Optional.empty());
+        when(matchingAttemptService.prepareInitial(1L))
+                .thenThrow(new BusinessException(ErrorCode.MATCHING_REQUEST_NOT_FOUND));
 
         assertThatThrownBy(() -> matchingCandidateService.getCandidates(1L))
                 .isInstanceOfSatisfying(BusinessException.class, exception ->
@@ -112,12 +120,69 @@ class MatchingCandidateServiceTest {
     }
 
     @Test
+    void rematches_with_only_eligible_candidates_and_returns_retry_metadata() {
+        MatchingRequest matchingRequest = matchingRequest();
+        MatchingProfile previousCandidate = matchingProfile(22L);
+        MatchingProfile nextCandidate = matchingProfile(23L);
+        when(matchingAttemptService.prepareRematch(1L)).thenReturn(
+                MatchingAttemptService.AttemptPreparation.started(
+                        40L,
+                        matchingRequest,
+                        Set.of(22L)
+                )
+        );
+        when(matchingProfileRepository.findActiveProfilesExceptUser(1L))
+                .thenReturn(List.of(previousCandidate, nextCandidate));
+        when(matchingAiClient.getCandidates(any(MatchingCandidateAiRequest.class))).thenReturn(
+                MatchingAiCandidatesResponse.of(List.of(new MatchingAiCandidateResponse(23L, 91)))
+        );
+        when(matchingAttemptService.complete(any(), any())).thenReturn(
+                new MatchingAttemptService.AttemptResult(1, 2, true)
+        );
+
+        MatchingCandidatesResponse response = matchingCandidateService.rematch(1L);
+
+        assertThat(response.candidates()).extracting(candidate -> candidate.userId())
+                .containsExactly(23L);
+        assertThat(response.retryCount()).isEqualTo(1);
+        assertThat(response.remainingRetryCount()).isEqualTo(2);
+        assertThat(response.canRematch()).isTrue();
+        ArgumentCaptor<MatchingCandidateAiRequest> requestCaptor =
+                ArgumentCaptor.forClass(MatchingCandidateAiRequest.class);
+        verify(matchingAiClient).getCandidates(requestCaptor.capture());
+        assertThat(requestCaptor.getValue().candidates())
+                .extracting(candidate -> candidate.userId())
+                .containsExactly(23L);
+    }
+
+    @Test
+    void records_failed_attempt_without_completing_rematch() {
+        MatchingRequest matchingRequest = matchingRequest();
+        MatchingProfile candidateProfile = matchingProfile(22L);
+        BusinessException aiFailure = new BusinessException(ErrorCode.EXTERNAL_API_ERROR);
+        when(matchingAttemptService.prepareRematch(1L)).thenReturn(
+                MatchingAttemptService.AttemptPreparation.started(40L, matchingRequest, Set.of())
+        );
+        when(matchingProfileRepository.findActiveProfilesExceptUser(1L)).thenReturn(List.of(candidateProfile));
+        when(matchingAiClient.getCandidates(any(MatchingCandidateAiRequest.class))).thenThrow(aiFailure);
+
+        assertThatThrownBy(() -> matchingCandidateService.rematch(1L))
+                .isSameAs(aiFailure);
+        verify(matchingAttemptService).fail(40L, aiFailure);
+        verify(matchingAttemptService, never()).complete(any(), any());
+    }
+
+    @Test
     void responds_candidate_and_creates_match_connection() {
         MatchingRequest matchingRequest = matchingRequest();
         User targetUser = activeUser(22L, "매칭후보");
         when(matchingRequestRepository.findFirstByRequester_IdAndStatusInOrderByIdDesc(
                 1L,
-                List.of(MatchingRequestStatus.ACTIVE, MatchingRequestStatus.CONNECTED)
+                List.of(
+                        MatchingRequestStatus.ACTIVE,
+                        MatchingRequestStatus.EXHAUSTED,
+                        MatchingRequestStatus.CONNECTED
+                )
         )).thenReturn(Optional.of(matchingRequest));
         when(userRepository.findById(22L)).thenReturn(Optional.of(targetUser));
         when(matchConnectionRepository.findByMatchingRequest_IdAndTargetUser_IdAndStatus(
@@ -164,7 +229,11 @@ class MatchingCandidateServiceTest {
         matchingRequest.markConnected();
         when(matchingRequestRepository.findFirstByRequester_IdAndStatusInOrderByIdDesc(
                 1L,
-                List.of(MatchingRequestStatus.ACTIVE, MatchingRequestStatus.CONNECTED)
+                List.of(
+                        MatchingRequestStatus.ACTIVE,
+                        MatchingRequestStatus.EXHAUSTED,
+                        MatchingRequestStatus.CONNECTED
+                )
         )).thenReturn(Optional.of(matchingRequest));
         when(userRepository.findById(22L)).thenReturn(Optional.of(targetUser));
         when(matchConnectionRepository.findByMatchingRequest_IdAndTargetUser_IdAndStatus(
@@ -189,7 +258,11 @@ class MatchingCandidateServiceTest {
     void rejects_response_when_matching_request_not_found() {
         when(matchingRequestRepository.findFirstByRequester_IdAndStatusInOrderByIdDesc(
                 1L,
-                List.of(MatchingRequestStatus.ACTIVE, MatchingRequestStatus.CONNECTED)
+                List.of(
+                        MatchingRequestStatus.ACTIVE,
+                        MatchingRequestStatus.EXHAUSTED,
+                        MatchingRequestStatus.CONNECTED
+                )
         )).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> matchingCandidateService.respondCandidate(1L, new CreateMatchConnectionRequest(22L)))
@@ -203,7 +276,11 @@ class MatchingCandidateServiceTest {
         MatchingRequest matchingRequest = matchingRequest();
         when(matchingRequestRepository.findFirstByRequester_IdAndStatusInOrderByIdDesc(
                 1L,
-                List.of(MatchingRequestStatus.ACTIVE, MatchingRequestStatus.CONNECTED)
+                List.of(
+                        MatchingRequestStatus.ACTIVE,
+                        MatchingRequestStatus.EXHAUSTED,
+                        MatchingRequestStatus.CONNECTED
+                )
         )).thenReturn(Optional.of(matchingRequest));
         when(userRepository.findById(1L)).thenReturn(Optional.of(activeUser(1L, "윤혁")));
 

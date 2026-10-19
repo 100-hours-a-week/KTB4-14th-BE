@@ -7,6 +7,8 @@ import java.util.Collection;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 public interface MatchingRequestRepository extends JpaRepository<MatchingRequest, Long> {
 
@@ -19,4 +21,8 @@ public interface MatchingRequestRepository extends JpaRepository<MatchingRequest
             Long requesterId,
             Collection<MatchingRequestStatus> statuses
     );
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select request from MatchingRequest request where request.id = :requestId")
+    Optional<MatchingRequest> findByIdForUpdate(@Param("requestId") Long requestId);
 }

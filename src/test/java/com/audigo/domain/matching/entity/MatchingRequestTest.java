@@ -59,6 +59,32 @@ class MatchingRequestTest {
                 .isInstanceOf(IllegalStateException.class);
     }
 
+    @Test
+    void allows_three_rematches_and_exhausts_session_on_third_success() {
+        MatchingRequest request = matchingRequest();
+
+        request.completeRematch();
+        request.completeRematch();
+        request.completeRematch();
+
+        assertThat(request.getRetryCount()).isEqualTo(3);
+        assertThat(request.getRemainingRetryCount()).isZero();
+        assertThat(request.canRematch()).isFalse();
+        assertThat(request.getStatus()).isEqualTo(MatchingRequestStatus.EXHAUSTED);
+    }
+
+    @Test
+    void exhausted_session_can_still_connect_to_last_candidates() {
+        MatchingRequest request = matchingRequest();
+        request.completeRematch();
+        request.completeRematch();
+        request.completeRematch();
+
+        request.markConnected();
+
+        assertThat(request.getStatus()).isEqualTo(MatchingRequestStatus.CONNECTED);
+    }
+
     private MatchingRequest matchingRequest() {
         return MatchingRequest.create(
                 User.create("요청자", null),
