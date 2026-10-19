@@ -18,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class ChatRoomListService {
 
     private static final int DEFAULT_SIZE = 20;
+    private static final int MIN_CHAT_NAME_LENGTH = 2;
     private static final int MAX_CHAT_NAME_LENGTH = 5;
 
     private final ChatRoomListRepository chatRoomListRepository;
@@ -91,7 +92,7 @@ public class ChatRoomListService {
         }
 
         String normalized = chatName.trim();
-        if (normalized.isEmpty() || normalized.length() > MAX_CHAT_NAME_LENGTH) {
+        if (normalized.length() < MIN_CHAT_NAME_LENGTH || normalized.length() > MAX_CHAT_NAME_LENGTH) {
             throw new BusinessException(ErrorCode.INVALID_REQUEST);
         }
         return normalized;
