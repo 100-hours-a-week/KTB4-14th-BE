@@ -12,6 +12,7 @@ import com.audigo.domain.matching.entity.MatchConnectionStatus;
 import com.audigo.domain.matching.entity.MatchingProfile;
 import com.audigo.domain.matching.entity.MatchingProfileTheme;
 import com.audigo.domain.matching.entity.MatchingRequest;
+import com.audigo.domain.matching.entity.MatchingRequestStatus;
 import com.audigo.domain.matching.repository.MatchConnectionRepository;
 import com.audigo.domain.matching.repository.MatchingProfileRepository;
 import com.audigo.domain.matching.repository.MatchingRequestRepository;
@@ -56,7 +57,10 @@ public class MatchingCandidateService {
 
     @Transactional(readOnly = true)
     public MatchingCandidatesResponse getCandidates(Long userId) {
-        MatchingRequest matchingRequest = matchingRequestRepository.findByRequester_Id(userId)
+        MatchingRequest matchingRequest = matchingRequestRepository.findByRequester_IdAndStatus(
+                        userId,
+                        MatchingRequestStatus.ACTIVE
+                )
                 .orElseThrow(() -> new BusinessException(ErrorCode.MATCHING_REQUEST_NOT_FOUND));
         List<MatchingProfile> candidateProfiles = matchingProfileRepository.findActiveProfilesExceptUser(userId)
                 .stream()
@@ -108,7 +112,11 @@ public class MatchingCandidateService {
         if (request == null || request.targetUserId() == null) {
             throw new BusinessException(ErrorCode.VALIDATION_FAILED);
         }
-        MatchingRequest matchingRequest = matchingRequestRepository.findByRequesterIdForUpdate(userId)
+        MatchingRequest matchingRequest = matchingRequestRepository
+                .findFirstByRequester_IdAndStatusInOrderByIdDesc(
+                        userId,
+                        List.of(MatchingRequestStatus.ACTIVE, MatchingRequestStatus.CONNECTED)
+                )
                 .orElseThrow(() -> new BusinessException(ErrorCode.MATCHING_REQUEST_NOT_FOUND));
         User targetUser = userRepository.findById(request.targetUserId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
@@ -127,10 +135,16 @@ public class MatchingCandidateService {
                 )
                 .orElse(null);
         if (connection != null) {
+            matchingRequest.markConnected();
             return MatchConnectionResponse.from(connection);
         }
 
+        if (matchingRequest.getStatus() != MatchingRequestStatus.ACTIVE) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED);
+        }
+
         connection = matchConnectionRepository.save(MatchConnection.create(matchingRequest, targetUser));
+        matchingRequest.markConnected();
         notifyParticipants(matchingRequest.getRequester(), targetUser, connection.getId());
         return MatchConnectionResponse.from(connection);
     }

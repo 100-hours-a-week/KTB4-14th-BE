@@ -27,6 +27,7 @@ public enum ErrorCode {
     CHAT_ROOM_ENDED(HttpStatus.CONFLICT, "chat_room_ended"),
     IDEMPOTENCY_KEY_CONFLICT(HttpStatus.CONFLICT, "idempotency_key_conflict"),
     TRAVEL_GENERATION_IN_PROGRESS(HttpStatus.CONFLICT, "travel_generation_in_progress"),
+    MATCHING_REQUEST_ALREADY_ACTIVE(HttpStatus.CONFLICT, "matching_request_already_active"),
     OVERLAPPING_CONFIRMED_TRAVEL(HttpStatus.CONFLICT, "overlapping_confirmed_travel"),
     VALIDATION_FAILED(HttpStatus.UNPROCESSABLE_ENTITY, "validation_failed"),
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "internal_server_error"),
