@@ -28,6 +28,8 @@ public enum ErrorCode {
     IDEMPOTENCY_KEY_CONFLICT(HttpStatus.CONFLICT, "idempotency_key_conflict"),
     TRAVEL_GENERATION_IN_PROGRESS(HttpStatus.CONFLICT, "travel_generation_in_progress"),
     MATCHING_REQUEST_ALREADY_ACTIVE(HttpStatus.CONFLICT, "matching_request_already_active"),
+    MATCHING_REMATCH_IN_PROGRESS(HttpStatus.CONFLICT, "matching_rematch_in_progress"),
+    MATCHING_REMATCH_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "matching_rematch_limit_exceeded"),
     OVERLAPPING_CONFIRMED_TRAVEL(HttpStatus.CONFLICT, "overlapping_confirmed_travel"),
     VALIDATION_FAILED(HttpStatus.UNPROCESSABLE_ENTITY, "validation_failed"),
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "internal_server_error"),
