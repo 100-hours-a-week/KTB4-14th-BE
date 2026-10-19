@@ -116,4 +116,16 @@ public class NotificationSetting {
         this.travelCompleteEnabled = travelCompleteEnabled;
         this.notificationEnabled = notificationEnabled;
     }
+
+    public void updateV2(
+            boolean matchSuccessEnabled,
+            boolean chatEnabled,
+            boolean travelCompleteEnabled,
+            boolean notificationEnabled
+    ) {
+        this.matchSuccessEnabled = matchSuccessEnabled;
+        this.chatEnabled = chatEnabled;
+        this.travelCompleteEnabled = travelCompleteEnabled;
+        this.notificationEnabled = notificationEnabled;
+    }
 }

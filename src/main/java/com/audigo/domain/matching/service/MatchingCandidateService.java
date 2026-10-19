@@ -15,6 +15,7 @@ import com.audigo.domain.matching.entity.MatchingRequest;
 import com.audigo.domain.matching.repository.MatchConnectionRepository;
 import com.audigo.domain.matching.repository.MatchingProfileRepository;
 import com.audigo.domain.matching.repository.MatchingRequestRepository;
+import com.audigo.domain.notification.service.NotificationService;
 import com.audigo.domain.user.entity.User;
 import com.audigo.domain.user.repository.UserRepository;
 import com.audigo.global.error.BusinessException;
@@ -35,19 +36,22 @@ public class MatchingCandidateService {
     private final MatchingAiClient matchingAiClient;
     private final MatchConnectionRepository matchConnectionRepository;
     private final UserRepository userRepository;
+    private final NotificationService notificationService;
 
     public MatchingCandidateService(
             MatchingRequestRepository matchingRequestRepository,
             MatchingProfileRepository matchingProfileRepository,
             MatchingAiClient matchingAiClient,
             MatchConnectionRepository matchConnectionRepository,
-            UserRepository userRepository
+            UserRepository userRepository,
+            NotificationService notificationService
     ) {
         this.matchingRequestRepository = matchingRequestRepository;
         this.matchingProfileRepository = matchingProfileRepository;
         this.matchingAiClient = matchingAiClient;
         this.matchConnectionRepository = matchConnectionRepository;
         this.userRepository = userRepository;
+        this.notificationService = notificationService;
     }
 
     @Transactional(readOnly = true)
@@ -104,7 +108,7 @@ public class MatchingCandidateService {
         if (request == null || request.targetUserId() == null) {
             throw new BusinessException(ErrorCode.VALIDATION_FAILED);
         }
-        MatchingRequest matchingRequest = matchingRequestRepository.findByRequester_Id(userId)
+        MatchingRequest matchingRequest = matchingRequestRepository.findByRequesterIdForUpdate(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.MATCHING_REQUEST_NOT_FOUND));
         User targetUser = userRepository.findById(request.targetUserId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
@@ -121,7 +125,26 @@ public class MatchingCandidateService {
                         targetUser.id(),
                         MatchConnectionStatus.ACTIVE
                 )
-                .orElseGet(() -> matchConnectionRepository.save(MatchConnection.create(matchingRequest, targetUser)));
+                .orElse(null);
+        if (connection != null) {
+            return MatchConnectionResponse.from(connection);
+        }
+
+        connection = matchConnectionRepository.save(MatchConnection.create(matchingRequest, targetUser));
+        notifyParticipants(matchingRequest.getRequester(), targetUser, connection.getId());
         return MatchConnectionResponse.from(connection);
+    }
+
+    private void notifyParticipants(User requester, User targetUser, Long matchConnectionId) {
+        notificationService.notifyMatchSuccess(
+                requester.id(),
+                matchConnectionId,
+                targetUser.nickname() + "님과 매칭이 완료되었습니다."
+        );
+        notificationService.notifyMatchSuccess(
+                targetUser.id(),
+                matchConnectionId,
+                requester.nickname() + "님과 매칭이 완료되었습니다."
+        );
     }
 }
