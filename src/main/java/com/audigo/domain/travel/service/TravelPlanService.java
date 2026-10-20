@@ -220,8 +220,11 @@ public class TravelPlanService {
         );
     }
 
-    // 도착시간이 출발시간보다 빠른지 확인
+    // 여행 기간과 요청 값을 검증
     private void validateRequest(TravelPlanRequest request) {
+        if (!request.isTravelPeriodValid() || !request.isTravelDurationValid()) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED);
+        }
         if (request.arrivalDatetime().isBefore(LocalDateTime.now())) {
             throw new BusinessException(ErrorCode.VALIDATION_FAILED);
         }

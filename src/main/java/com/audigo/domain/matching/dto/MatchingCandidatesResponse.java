@@ -1,10 +1,14 @@
 package com.audigo.domain.matching.dto;
 
 import java.util.List;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 public record MatchingCandidatesResponse(
         List<MatchingCandidateResponse> candidates,
-        int count
+        int count,
+        @JsonProperty("retry_count") int retryCount,
+        @JsonProperty("remaining_retry_count") int remainingRetryCount,
+        @JsonProperty("can_rematch") boolean canRematch
 ) {
 
     public MatchingCandidatesResponse {
@@ -13,10 +17,25 @@ public record MatchingCandidatesResponse(
     }
 
     public static MatchingCandidatesResponse empty() {
-        return new MatchingCandidatesResponse(List.of(), 0);
+        return new MatchingCandidatesResponse(List.of(), 0, 0, 3, true);
     }
 
     public static MatchingCandidatesResponse of(List<MatchingCandidateResponse> candidates) {
-        return new MatchingCandidatesResponse(candidates, candidates == null ? 0 : candidates.size());
+        return of(candidates, 0, 3, true);
+    }
+
+    public static MatchingCandidatesResponse of(
+            List<MatchingCandidateResponse> candidates,
+            int retryCount,
+            int remainingRetryCount,
+            boolean canRematch
+    ) {
+        return new MatchingCandidatesResponse(
+                candidates,
+                candidates == null ? 0 : candidates.size(),
+                retryCount,
+                remainingRetryCount,
+                canRematch
+        );
     }
 }

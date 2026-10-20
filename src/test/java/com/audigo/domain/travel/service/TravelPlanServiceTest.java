@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.audigo.domain.travel.dto.TravelPlanRequest;
@@ -67,6 +68,24 @@ class TravelPlanServiceTest {
 
         verify(regionRepository, never()).findById(1L);
         verify(travelPlanRepository, never()).save(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void rejects_travel_longer_than_seven_calendar_days() {
+        LocalDateTime arrival = LocalDateTime.now().plusDays(1);
+        TravelPlanRequest request = requestWithDates(arrival, arrival.plusDays(7));
+
+        assertThatThrownBy(() -> travelPlanService.createTravelPlan(1L, request))
+                .isInstanceOfSatisfying(BusinessException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_FAILED)
+                );
+
+        verifyNoInteractions(
+                travelGenerationJobRepository,
+                regionRepository,
+                placeRepository,
+                travelPlanRepository
+        );
     }
 
     @Test
@@ -204,6 +223,10 @@ class TravelPlanServiceTest {
 
     private TravelPlanRequest validRequest() {
         LocalDateTime arrival = LocalDateTime.now().plusDays(1);
+        return requestWithDates(arrival, arrival.plusDays(2));
+    }
+
+    private TravelPlanRequest requestWithDates(LocalDateTime arrival, LocalDateTime departure) {
         TravelPreferenceRequest preference = new TravelPreferenceRequest(
                 TravelPaceType.BALANCED,
                 TravelTransportType.WALK,
@@ -218,7 +241,7 @@ class TravelPlanServiceTest {
         return new TravelPlanRequest(
                 1L,
                 arrival,
-                arrival.plusDays(2),
+                departure,
                 2,
                 CompanionType.FRIEND,
                 preference,

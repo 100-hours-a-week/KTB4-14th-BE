@@ -21,6 +21,7 @@ import com.audigo.domain.chat.repository.ChatMessageRepository;
 import com.audigo.domain.chat.repository.ChatRoomDetailRepository;
 import com.audigo.domain.chat.repository.ChatRoomMemberRepository;
 import com.audigo.domain.chat.repository.ChatRoomRepository;
+import com.audigo.domain.notification.service.NotificationService;
 import com.audigo.domain.user.entity.User;
 import com.audigo.domain.user.repository.UserRepository;
 import com.audigo.global.error.BusinessException;
@@ -68,6 +69,9 @@ class ChatMessageServiceTest {
     private SimpMessagingTemplate messagingTemplate;
 
     @Mock
+    private NotificationService notificationService;
+
+    @Mock
     private ChatRoom room;
 
     @Mock
@@ -91,6 +95,7 @@ class ChatMessageServiceTest {
         stubNewMessagePath(0);
         when(room.getId()).thenReturn(ROOM_ID);
         when(sender.id()).thenReturn(SENDER_ID);
+        when(sender.nickname()).thenReturn("상대방");
         when(room.recordMessage(any(LocalDateTime.class))).thenReturn(7L);
         when(chatMessageRepository.saveAndFlush(any(ChatMessage.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
@@ -126,6 +131,35 @@ class ChatMessageServiceTest {
                 eq("/queue/chat/messages"),
                 any(ChatMessageRealtimeEvent.class)
         );
+        verify(notificationService).notifyNewMessage(
+                RECIPIENT_ID,
+                ROOM_ID,
+                "상대방님이 메시지를 보냈습니다"
+        );
+    }
+
+    @Test
+    void does_not_create_another_notification_when_the_room_already_has_unread_messages() {
+        stubNewMessagePath(0);
+        when(chatMessageRepository.countUnreadMessages(ROOM_ID, RECIPIENT_ID, ChatMessageStatus.SENT))
+                .thenReturn(1L);
+        when(room.getId()).thenReturn(ROOM_ID);
+        when(sender.id()).thenReturn(SENDER_ID);
+        when(room.recordMessage(any(LocalDateTime.class))).thenReturn(8L);
+        when(chatMessageRepository.saveAndFlush(any(ChatMessage.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        TransactionSynchronizationManager.initSynchronization();
+
+        service.send(
+                SENDER_ID,
+                ROOM_ID,
+                new SendChatMessageCommand(CLIENT_MESSAGE_ID, "second message")
+        );
+
+        TransactionSynchronizationManager.getSynchronizations()
+                .forEach(TransactionSynchronization::afterCommit);
+
+        verify(notificationService, never()).notifyNewMessage(any(), any(), any());
     }
 
     @Test

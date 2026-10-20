@@ -5,6 +5,8 @@ import com.audigo.domain.notification.dto.NotificationSettingsResponse;
 import com.audigo.domain.notification.dto.ReadNotificationsRequest;
 import com.audigo.domain.notification.dto.UnreadCountResponse;
 import com.audigo.domain.notification.dto.UpdateNotificationSettingsRequest;
+import com.audigo.domain.notification.dto.V2NotificationSettingsResponse;
+import com.audigo.domain.notification.dto.V2UpdateNotificationSettingsRequest;
 import com.audigo.domain.notification.service.NotificationService;
 import com.audigo.global.response.ApiResponse;
 import com.audigo.global.security.CurrentUser;
@@ -76,6 +78,21 @@ public class NotificationController {
         return ApiResponse.of(
                 "notification_settings_updated",
                 notificationService.updateSettings(currentUser.id(), request)
+        );
+    }
+
+    @GetMapping("/api/v2/notification-settings")
+    public ApiResponse<V2NotificationSettingsResponse> getV2Settings() {
+        return ApiResponse.of("notification_settings_found", notificationService.getV2Settings(currentUser.id()));
+    }
+
+    @PatchMapping("/api/v2/notification-settings")
+    public ApiResponse<V2NotificationSettingsResponse> updateV2Settings(
+            @RequestBody V2UpdateNotificationSettingsRequest request
+    ) {
+        return ApiResponse.of(
+                "notification_settings_updated",
+                notificationService.updateV2Settings(currentUser.id(), request)
         );
     }
 }
