@@ -8,9 +8,12 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.audigo.domain.matching.dto.CreateMatchingRequestRequest;
+import com.audigo.domain.matching.entity.MatchingAttempt;
+import com.audigo.domain.matching.entity.MatchingAttemptStatus;
 import com.audigo.domain.matching.entity.MatchingRequest;
 import com.audigo.domain.matching.entity.MatchingRequestStatus;
 import com.audigo.domain.matching.entity.PreferredCompanionGender;
+import com.audigo.domain.matching.repository.MatchingAttemptRepository;
 import com.audigo.domain.matching.repository.MatchingRequestRepository;
 import com.audigo.domain.travel.entity.TravelPaceType;
 import com.audigo.domain.travel.entity.TravelThemeType;
@@ -25,12 +28,16 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
 class MatchingRequestServiceTest {
 
     @Mock
     private MatchingRequestRepository matchingRequestRepository;
+
+    @Mock
+    private MatchingAttemptRepository matchingAttemptRepository;
 
     @Mock
     private UserRepository userRepository;
@@ -121,8 +128,14 @@ class MatchingRequestServiceTest {
     @Test
     void gets_my_matching_request() {
         MatchingRequest matchingRequest = matchingRequest();
-        when(matchingRequestRepository.findByRequester_IdAndStatus(1L, MatchingRequestStatus.ACTIVE))
+        MatchingAttempt attempt = MatchingAttempt.start(matchingRequest, 0);
+        attempt.succeed(List.of());
+        when(matchingRequestRepository.findFirstByRequester_IdOrderByIdDesc(1L))
                 .thenReturn(Optional.of(matchingRequest));
+        when(matchingAttemptRepository.findFirstByMatchingRequest_IdOrderByIdDesc(10L))
+                .thenReturn(Optional.of(attempt));
+        when(matchingAttemptRepository.existsByMatchingRequest_IdAndStatus(10L, MatchingAttemptStatus.SUCCEEDED))
+                .thenReturn(true);
 
         var response = matchingRequestService.getMine(1L);
 
@@ -131,12 +144,56 @@ class MatchingRequestServiceTest {
         assertThat(response.pace()).isEqualTo(TravelPaceType.BALANCED);
         assertThat(response.budgetMin()).isEqualTo(100_000);
         assertThat(response.budgetMax()).isEqualTo(800_000);
+        assertThat(response.status()).isEqualTo(MatchingRequestStatus.ACTIVE);
+        assertThat(response.latestAttemptStatus()).isEqualTo(MatchingAttemptStatus.SUCCEEDED);
+        assertThat(response.retryCount()).isZero();
+        assertThat(response.remainingRetryCount()).isEqualTo(3);
+        assertThat(response.canRematch()).isTrue();
+        assertThat(response.hasResult()).isTrue();
+    }
+
+    @Test
+    void gets_exhausted_matching_request_for_result_recovery() {
+        MatchingRequest matchingRequest = matchingRequest();
+        matchingRequest.completeRematch();
+        matchingRequest.completeRematch();
+        matchingRequest.completeRematch();
+        MatchingAttempt attempt = MatchingAttempt.start(matchingRequest, 3);
+        attempt.succeed(List.of());
+        when(matchingRequestRepository.findFirstByRequester_IdOrderByIdDesc(1L))
+                .thenReturn(Optional.of(matchingRequest));
+        when(matchingAttemptRepository.findFirstByMatchingRequest_IdOrderByIdDesc(10L))
+                .thenReturn(Optional.of(attempt));
+        when(matchingAttemptRepository.existsByMatchingRequest_IdAndStatus(10L, MatchingAttemptStatus.SUCCEEDED))
+                .thenReturn(true);
+
+        var response = matchingRequestService.getMine(1L);
+
+        assertThat(response.status()).isEqualTo(MatchingRequestStatus.EXHAUSTED);
+        assertThat(response.latestAttemptStatus()).isEqualTo(MatchingAttemptStatus.SUCCEEDED);
+        assertThat(response.retryCount()).isEqualTo(3);
+        assertThat(response.remainingRetryCount()).isZero();
+        assertThat(response.canRematch()).isFalse();
+        assertThat(response.hasResult()).isTrue();
     }
 
     @Test
     void rejects_get_when_my_matching_request_not_found() {
-        when(matchingRequestRepository.findByRequester_IdAndStatus(1L, MatchingRequestStatus.ACTIVE))
+        when(matchingRequestRepository.findFirstByRequester_IdOrderByIdDesc(1L))
                 .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> matchingRequestService.getMine(1L))
+                .isInstanceOfSatisfying(BusinessException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.MATCHING_REQUEST_NOT_FOUND)
+                );
+    }
+
+    @Test
+    void rejects_get_when_latest_matching_request_is_terminal() {
+        MatchingRequest matchingRequest = matchingRequest();
+        matchingRequest.cancel();
+        when(matchingRequestRepository.findFirstByRequester_IdOrderByIdDesc(1L))
+                .thenReturn(Optional.of(matchingRequest));
 
         assertThatThrownBy(() -> matchingRequestService.getMine(1L))
                 .isInstanceOfSatisfying(BusinessException.class, exception ->
@@ -189,7 +246,7 @@ class MatchingRequestServiceTest {
     }
 
     private MatchingRequest matchingRequest() {
-        return MatchingRequest.create(
+        MatchingRequest request = MatchingRequest.create(
                 activeUser(),
                 PreferredCompanionGender.FEMALE,
                 TravelPaceType.BALANCED,
@@ -197,5 +254,7 @@ class MatchingRequestServiceTest {
                 800_000,
                 List.of(TravelThemeType.NATURE, TravelThemeType.FOOD)
         );
+        ReflectionTestUtils.setField(request, "id", 10L);
+        return request;
     }
 }

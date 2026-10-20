@@ -20,6 +20,8 @@ public interface MatchingAttemptRepository extends JpaRepository<MatchingAttempt
             MatchingAttemptStatus status
     );
 
+    Optional<MatchingAttempt> findFirstByMatchingRequest_IdOrderByIdDesc(Long matchingRequestId);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select attempt from MatchingAttempt attempt where attempt.id = :attemptId")
     Optional<MatchingAttempt> findByIdForUpdate(@Param("attemptId") Long attemptId);
