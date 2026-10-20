@@ -142,6 +142,11 @@ public class MatchingRequest {
     }
 
     public void cancel() {
+        if (status == MatchingRequestStatus.EXHAUSTED) {
+            status = MatchingRequestStatus.CANCELLED;
+            endedAt = LocalDateTime.now();
+            return;
+        }
         finish(MatchingRequestStatus.CANCELLED);
     }
 

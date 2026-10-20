@@ -46,6 +46,14 @@ public class MatchingCandidateController {
         );
     }
 
+    @PostMapping("/candidates/retry")
+    public ApiResponse<MatchingCandidatesResponse> retry() {
+        return ApiResponse.of(
+                "retry_candidates_success",
+                matchingCandidateService.retry(currentUser.id())
+        );
+    }
+
     @PostMapping("/responses")
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<MatchConnectionResponse> respondCandidate(

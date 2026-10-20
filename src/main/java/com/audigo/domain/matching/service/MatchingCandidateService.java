@@ -67,9 +67,24 @@ public class MatchingCandidateService {
         return generateCandidates(matchingAttemptService.prepareRematch(userId));
     }
 
+    public MatchingCandidatesResponse retry(Long userId) {
+        return generateCandidates(matchingAttemptService.prepareRetry(userId));
+    }
+
     private MatchingCandidatesResponse generateCandidates(
             MatchingAttemptService.AttemptPreparation preparation
     ) {
+        try {
+            return loadCandidates(preparation);
+        } catch (RuntimeException exception) {
+            if (!preparation.cached()) {
+                matchingAttemptService.fail(preparation.attemptId(), exception);
+            }
+            throw exception;
+        }
+    }
+
+    private MatchingCandidatesResponse loadCandidates(MatchingAttemptService.AttemptPreparation preparation) {
         Long userId = preparation.matchingRequest().getRequester().id();
         List<MatchingProfile> candidateProfiles = matchingProfileRepository.findActiveProfilesExceptUser(userId)
                 .stream()
@@ -94,30 +109,25 @@ public class MatchingCandidateService {
             );
         }
 
-        try {
-            MatchingAiCandidatesResponse aiResponse = matchingAiClient.getCandidates(
-                    MatchingCandidateAiRequest.from(preparation.matchingRequest(), candidateProfiles)
-            );
-            List<MatchingCandidateResponse> candidates = mapCandidates(aiResponse, candidateProfiles);
-            MatchingAttemptService.AttemptResult result = matchingAttemptService.complete(
-                    preparation.attemptId(),
-                    candidates.stream()
-                            .map(candidate -> new MatchingAttempt.CandidateScore(
-                                    candidate.userId(),
-                                    candidate.matchRate()
-                            ))
-                            .toList()
-            );
-            return MatchingCandidatesResponse.of(
-                    candidates,
-                    result.retryCount(),
-                    result.remainingRetryCount(),
-                    result.canRematch()
-            );
-        } catch (RuntimeException exception) {
-            matchingAttemptService.fail(preparation.attemptId(), exception);
-            throw exception;
-        }
+        MatchingAiCandidatesResponse aiResponse = matchingAiClient.getCandidates(
+                MatchingCandidateAiRequest.from(preparation.matchingRequest(), candidateProfiles)
+        );
+        List<MatchingCandidateResponse> candidates = mapCandidates(aiResponse, candidateProfiles);
+        MatchingAttemptService.AttemptResult result = matchingAttemptService.complete(
+                preparation.attemptId(),
+                candidates.stream()
+                        .map(candidate -> new MatchingAttempt.CandidateScore(
+                                candidate.userId(),
+                                candidate.matchRate()
+                        ))
+                        .toList()
+        );
+        return MatchingCandidatesResponse.of(
+                candidates,
+                result.retryCount(),
+                result.remainingRetryCount(),
+                result.canRematch()
+        );
     }
 
     private MatchingCandidatesResponse toCandidateResponse(

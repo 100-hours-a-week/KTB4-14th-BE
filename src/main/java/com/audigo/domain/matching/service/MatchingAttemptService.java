@@ -65,25 +65,53 @@ public class MatchingAttemptService {
             throw new BusinessException(ErrorCode.MATCHING_REQUEST_NOT_FOUND);
         }
 
-        Set<Long> excludedUserIds = new HashSet<>(activeCounterpartIds(userId));
-        latest.getCandidates().stream()
-                .map(MatchingAttemptCandidate::getCandidateUserId)
-                .forEach(excludedUserIds::add);
+        return startAttempt(request, request.getRetryCount() + 1, latest);
+    }
+
+    @Transactional
+    public AttemptPreparation prepareRetry(Long userId) {
+        MatchingRequest request = findActiveRequestForUpdate(userId);
+        ensureNoAttemptInProgress(request.getId());
+        MatchingAttempt failed = matchingAttemptRepository.findFirstByMatchingRequest_IdOrderByIdDesc(request.getId())
+                .filter(attempt -> attempt.getStatus() == MatchingAttemptStatus.FAILED)
+                .orElseThrow(() -> new BusinessException(ErrorCode.MATCHING_RETRY_NOT_AVAILABLE));
+        MatchingAttempt previous = findLatestSuccessful(request.getId());
+        int retrySequence = previous == null ? 0 : request.getRetryCount() + 1;
+        if (!request.canRematch() || failed.getRetrySequence() != retrySequence) {
+            throw new BusinessException(ErrorCode.MATCHING_RETRY_NOT_AVAILABLE);
+        }
+        return startAttempt(request, retrySequence, previous);
+    }
+
+    private AttemptPreparation startAttempt(MatchingRequest request, int retrySequence, MatchingAttempt previous) {
+        Set<Long> excludedUserIds = new HashSet<>(activeCounterpartIds(request.getRequester().id()));
+        if (previous != null) {
+            previous.getCandidates().stream()
+                    .map(MatchingAttemptCandidate::getCandidateUserId)
+                    .forEach(excludedUserIds::add);
+        }
 
         MatchingAttempt attempt = matchingAttemptRepository.save(
-                MatchingAttempt.start(request, request.getRetryCount() + 1)
+                MatchingAttempt.start(request, retrySequence)
         );
         return AttemptPreparation.started(attempt.getId(), request, excludedUserIds);
     }
 
     @Transactional
     public AttemptResult complete(Long attemptId, List<MatchingAttempt.CandidateScore> candidates) {
+        // Lock the request before its attempt, as preparation and cancellation do.
+        Long requestId = matchingAttemptRepository.findMatchingRequestIdById(attemptId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.MATCHING_REQUEST_NOT_FOUND));
+        MatchingRequest request = matchingRequestRepository.findByIdForUpdate(requestId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.MATCHING_REQUEST_NOT_FOUND));
+        if (request.getStatus() != MatchingRequestStatus.ACTIVE) {
+            throw new BusinessException(ErrorCode.MATCHING_REQUEST_NOT_FOUND);
+        }
         MatchingAttempt attempt = matchingAttemptRepository.findByIdForUpdate(attemptId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.MATCHING_REQUEST_NOT_FOUND));
-        MatchingRequest request = matchingRequestRepository.findByIdForUpdate(
-                        attempt.getMatchingRequest().getId()
-                )
-                .orElseThrow(() -> new BusinessException(ErrorCode.MATCHING_REQUEST_NOT_FOUND));
+        if (attempt.getStatus() != MatchingAttemptStatus.PROCESSING) {
+            throw new BusinessException(ErrorCode.MATCHING_RETRY_NOT_AVAILABLE);
+        }
         attempt.succeed(candidates);
         if (attempt.getRetrySequence() > 0) {
             request.completeRematch();
@@ -93,20 +121,20 @@ public class MatchingAttemptService {
 
     @Transactional
     public void fail(Long attemptId, RuntimeException cause) {
+        Long requestId = matchingAttemptRepository.findMatchingRequestIdById(attemptId).orElse(null);
+        if (requestId == null || matchingRequestRepository.findByIdForUpdate(requestId).isEmpty()) {
+            return;
+        }
         matchingAttemptRepository.findByIdForUpdate(attemptId)
                 .filter(attempt -> attempt.getStatus() == MatchingAttemptStatus.PROCESSING)
                 .ifPresent(attempt -> attempt.fail(cause.getMessage()));
     }
 
     private MatchingRequest findActiveRequestForUpdate(Long userId) {
-        MatchingRequest request = matchingRequestRepository
-                .findFirstByRequester_IdAndStatusInOrderByIdDesc(
-                        userId,
-                        List.of(MatchingRequestStatus.ACTIVE)
-                )
-                .orElseThrow(() -> new BusinessException(ErrorCode.MATCHING_REQUEST_NOT_FOUND));
-        request.getThemes().size();
-        request.getRequester().id();
+        MatchingRequest request = findRestorableRequestForUpdate(userId);
+        if (request.getStatus() != MatchingRequestStatus.ACTIVE) {
+            throw new BusinessException(ErrorCode.MATCHING_REQUEST_NOT_FOUND);
+        }
         return request;
     }
 
