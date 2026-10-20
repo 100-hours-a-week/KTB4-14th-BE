@@ -15,6 +15,7 @@ import com.audigo.domain.matching.dto.MatchingCandidateAiRequest;
 import com.audigo.domain.matching.dto.MatchingCandidatesResponse;
 import com.audigo.domain.matching.entity.MatchConnection;
 import com.audigo.domain.matching.entity.MatchConnectionStatus;
+import com.audigo.domain.matching.entity.MatchingAttempt;
 import com.audigo.domain.matching.entity.MatchingGender;
 import com.audigo.domain.matching.entity.MatchingProfile;
 import com.audigo.domain.matching.entity.MatchingRequest;
@@ -170,6 +171,78 @@ class MatchingCandidateServiceTest {
                 .isSameAs(aiFailure);
         verify(matchingAttemptService).fail(40L, aiFailure);
         verify(matchingAttemptService, never()).complete(any(), any());
+    }
+
+    @Test
+    void records_profile_lookup_failure_so_attempt_does_not_stay_processing() {
+        RuntimeException lookupFailure = new RuntimeException("profile lookup failed");
+        when(matchingAttemptService.prepareInitial(1L)).thenReturn(
+                MatchingAttemptService.AttemptPreparation.started(40L, matchingRequest(), Set.of())
+        );
+        when(matchingProfileRepository.findActiveProfilesExceptUser(1L)).thenThrow(lookupFailure);
+
+        assertThatThrownBy(() -> matchingCandidateService.getCandidates(1L)).isSameAs(lookupFailure);
+
+        verify(matchingAttemptService).fail(40L, lookupFailure);
+        verify(matchingAiClient, never()).getCandidates(any());
+    }
+
+    @Test
+    void cached_result_lookup_failure_does_not_mark_previous_success_as_failed() {
+        RuntimeException lookupFailure = new RuntimeException("profile lookup failed");
+        when(matchingAttemptService.prepareInitial(1L)).thenReturn(
+                MatchingAttemptService.AttemptPreparation.cached(
+                        matchingRequest(), List.of(new MatchingAttemptService.StoredCandidate(22L, 89))
+                )
+        );
+        when(matchingProfileRepository.findActiveProfilesExceptUser(1L)).thenThrow(lookupFailure);
+
+        assertThatThrownBy(() -> matchingCandidateService.getCandidates(1L)).isSameAs(lookupFailure);
+
+        verify(matchingAttemptService, never()).fail(any(), any());
+        verify(matchingAttemptService, never()).complete(any(), any());
+    }
+
+    @Test
+    void retries_failed_attempt_and_returns_existing_response_contract() {
+        when(matchingAttemptService.prepareRetry(1L)).thenReturn(
+                MatchingAttemptService.AttemptPreparation.started(41L, matchingRequest(), Set.of())
+        );
+        when(matchingProfileRepository.findActiveProfilesExceptUser(1L))
+                .thenReturn(List.of(matchingProfile(22L)));
+        when(matchingAiClient.getCandidates(any(MatchingCandidateAiRequest.class))).thenReturn(
+                MatchingAiCandidatesResponse.of(List.of(new MatchingAiCandidateResponse(22L, 89)))
+        );
+        when(matchingAttemptService.complete(any(), any())).thenReturn(
+                new MatchingAttemptService.AttemptResult(0, 3, true)
+        );
+
+        MatchingCandidatesResponse response = matchingCandidateService.retry(1L);
+
+        assertThat(response.count()).isEqualTo(1);
+        assertThat(response.retryCount()).isZero();
+        assertThat(response.remainingRetryCount()).isEqualTo(3);
+        verify(matchingAttemptService).complete(41L, List.of(
+                new MatchingAttempt.CandidateScore(22L, 89)
+        ));
+    }
+
+    @Test
+    void retry_failure_is_recorded_without_completing_or_changing_retry_count() {
+        MatchingRequest request = matchingRequest();
+        BusinessException aiFailure = new BusinessException(ErrorCode.EXTERNAL_API_ERROR);
+        when(matchingAttemptService.prepareRetry(1L)).thenReturn(
+                MatchingAttemptService.AttemptPreparation.started(41L, request, Set.of())
+        );
+        when(matchingProfileRepository.findActiveProfilesExceptUser(1L))
+                .thenReturn(List.of(matchingProfile(22L)));
+        when(matchingAiClient.getCandidates(any(MatchingCandidateAiRequest.class))).thenThrow(aiFailure);
+
+        assertThatThrownBy(() -> matchingCandidateService.retry(1L)).isSameAs(aiFailure);
+
+        verify(matchingAttemptService).fail(41L, aiFailure);
+        verify(matchingAttemptService, never()).complete(any(), any());
+        assertThat(request.getRetryCount()).isZero();
     }
 
     @Test

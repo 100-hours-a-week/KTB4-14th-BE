@@ -68,12 +68,16 @@ public class MatchingRequestService {
 
     @Transactional
     public void cancelMine(Long userId) {
-        matchingRequestRepository.findFirstByRequester_IdAndStatusInOrderByIdDesc(
-                        userId,
-                        List.of(MatchingRequestStatus.ACTIVE)
-                )
-                .orElseThrow(() -> new BusinessException(ErrorCode.MATCHING_REQUEST_NOT_FOUND))
-                .cancel();
+        MatchingRequest request = matchingRequestRepository.findLatestByRequesterIdForUpdate(userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.MATCHING_REQUEST_NOT_FOUND));
+        if (request.getStatus() != MatchingRequestStatus.ACTIVE
+                && request.getStatus() != MatchingRequestStatus.EXHAUSTED) {
+            throw new BusinessException(ErrorCode.MATCHING_REQUEST_NOT_FOUND);
+        }
+        request.cancel();
+        matchingAttemptRepository.findAllByMatchingRequest_IdAndStatus(
+                request.getId(), MatchingAttemptStatus.PROCESSING
+        ).forEach(attempt -> attempt.fail("matching_request_cancelled"));
     }
 
     private MatchingRequest findMine(Long userId) {

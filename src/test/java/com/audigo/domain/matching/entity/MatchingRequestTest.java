@@ -85,6 +85,29 @@ class MatchingRequestTest {
         assertThat(request.getStatus()).isEqualTo(MatchingRequestStatus.CONNECTED);
     }
 
+    @Test
+    void exhausted_session_can_be_cancelled_for_new_conditions() {
+        MatchingRequest request = matchingRequest();
+        request.completeRematch();
+        request.completeRematch();
+        request.completeRematch();
+
+        request.cancel();
+
+        assertThat(request.getStatus()).isEqualTo(MatchingRequestStatus.CANCELLED);
+        assertThat(request.getRetryCount()).isEqualTo(3);
+        assertThat(request.getEndedAt()).isNotNull();
+    }
+
+    @Test
+    void connected_session_cannot_be_cancelled_by_new_conditions_action() {
+        MatchingRequest request = matchingRequest();
+        request.markConnected();
+
+        assertThatThrownBy(request::cancel).isInstanceOf(IllegalStateException.class);
+        assertThat(request.getStatus()).isEqualTo(MatchingRequestStatus.CONNECTED);
+    }
+
     private MatchingRequest matchingRequest() {
         return MatchingRequest.create(
                 User.create("요청자", null),
