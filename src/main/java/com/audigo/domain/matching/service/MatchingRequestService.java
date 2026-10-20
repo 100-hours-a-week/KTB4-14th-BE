@@ -3,6 +3,7 @@ package com.audigo.domain.matching.service;
 import com.audigo.domain.matching.dto.CreateMatchingRequestRequest;
 import com.audigo.domain.matching.dto.MatchingRequestResponse;
 import com.audigo.domain.matching.entity.MatchingRequest;
+import com.audigo.domain.matching.entity.MatchingRequestStatus;
 import com.audigo.domain.matching.repository.MatchingRequestRepository;
 import com.audigo.domain.travel.entity.TravelThemeType;
 import com.audigo.domain.user.entity.User;
@@ -31,10 +32,10 @@ public class MatchingRequestService {
     @Transactional
     public MatchingRequestResponse create(Long userId, CreateMatchingRequestRequest request) {
         validate(request);
-        if (matchingRequestRepository.existsByRequester_Id(userId)) {
-            throw new BusinessException(ErrorCode.VALIDATION_FAILED);
+        User requester = findActiveUserForUpdate(userId);
+        if (matchingRequestRepository.existsByRequester_IdAndStatus(userId, MatchingRequestStatus.ACTIVE)) {
+            throw new BusinessException(ErrorCode.MATCHING_REQUEST_ALREADY_ACTIVE);
         }
-        User requester = findActiveUser(userId);
         MatchingRequest matchingRequest = MatchingRequest.create(
                 requester,
                 request.preferredCompanionGender(),
@@ -53,11 +54,16 @@ public class MatchingRequestService {
 
     @Transactional
     public void cancelMine(Long userId) {
-        matchingRequestRepository.delete(findMine(userId));
+        matchingRequestRepository.findFirstByRequester_IdAndStatusInOrderByIdDesc(
+                        userId,
+                        List.of(MatchingRequestStatus.ACTIVE)
+                )
+                .orElseThrow(() -> new BusinessException(ErrorCode.MATCHING_REQUEST_NOT_FOUND))
+                .cancel();
     }
 
     private MatchingRequest findMine(Long userId) {
-        return matchingRequestRepository.findByRequester_Id(userId)
+        return matchingRequestRepository.findByRequester_IdAndStatus(userId, MatchingRequestStatus.ACTIVE)
                 .orElseThrow(() -> new BusinessException(ErrorCode.MATCHING_REQUEST_NOT_FOUND));
     }
 
@@ -84,8 +90,8 @@ public class MatchingRequestService {
         }
     }
 
-    private User findActiveUser(Long userId) {
-        User user = userRepository.findById(userId)
+    private User findActiveUserForUpdate(Long userId) {
+        User user = userRepository.findByIdForUpdate(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
         if (!user.isActive()) {
             throw new BusinessException(ErrorCode.USER_INACTIVE);

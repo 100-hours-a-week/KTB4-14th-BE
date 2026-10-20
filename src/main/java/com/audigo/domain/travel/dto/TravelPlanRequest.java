@@ -9,6 +9,7 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -42,6 +43,8 @@ public record TravelPlanRequest(
         @Valid
         List<@NotNull(message = "필수 장소 항목은 비어 있을 수 없습니다.") RequiredPlaceRequest> requiredPlaces
 ) {
+    public static final int MAX_TRAVEL_DAYS = 7;
+
     public TravelPlanRequest {
         requiredPlaces = requiredPlaces == null ? List.of() : List.copyOf(requiredPlaces);
     }
@@ -51,6 +54,19 @@ public record TravelPlanRequest(
         return arrivalDatetime == null
                 || departureDatetime == null
                 || arrivalDatetime.isBefore(departureDatetime);
+    }
+
+    @AssertTrue(message = "여행 기간은 최대 7일까지 가능합니다.")
+    public boolean isTravelDurationValid() {
+        if (arrivalDatetime == null || departureDatetime == null) {
+            return true;
+        }
+
+        long calendarDayDifference = ChronoUnit.DAYS.between(
+                arrivalDatetime.toLocalDate(),
+                departureDatetime.toLocalDate()
+        );
+        return calendarDayDifference >= 0 && calendarDayDifference < MAX_TRAVEL_DAYS;
     }
 
     @AssertTrue(message = "혼자 여행은 1명, 동행 여행은 2명 이상이어야 합니다.")

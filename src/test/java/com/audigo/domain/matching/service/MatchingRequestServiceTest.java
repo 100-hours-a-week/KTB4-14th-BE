@@ -3,11 +3,13 @@ package com.audigo.domain.matching.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.audigo.domain.matching.dto.CreateMatchingRequestRequest;
 import com.audigo.domain.matching.entity.MatchingRequest;
+import com.audigo.domain.matching.entity.MatchingRequestStatus;
 import com.audigo.domain.matching.entity.PreferredCompanionGender;
 import com.audigo.domain.matching.repository.MatchingRequestRepository;
 import com.audigo.domain.travel.entity.TravelPaceType;
@@ -38,8 +40,9 @@ class MatchingRequestServiceTest {
 
     @Test
     void creates_matching_request() {
-        when(matchingRequestRepository.existsByRequester_Id(1L)).thenReturn(false);
-        when(userRepository.findById(1L)).thenReturn(Optional.of(activeUser()));
+        when(userRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(activeUser()));
+        when(matchingRequestRepository.existsByRequester_IdAndStatus(1L, MatchingRequestStatus.ACTIVE))
+                .thenReturn(false);
         when(matchingRequestRepository.save(any(MatchingRequest.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -54,11 +57,13 @@ class MatchingRequestServiceTest {
 
     @Test
     void rejects_request_when_user_already_has_current_matching_request() {
-        when(matchingRequestRepository.existsByRequester_Id(1L)).thenReturn(true);
+        when(userRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(activeUser()));
+        when(matchingRequestRepository.existsByRequester_IdAndStatus(1L, MatchingRequestStatus.ACTIVE))
+                .thenReturn(true);
 
         assertThatThrownBy(() -> matchingRequestService.create(1L, validRequest()))
                 .isInstanceOfSatisfying(BusinessException.class, exception ->
-                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_FAILED)
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.MATCHING_REQUEST_ALREADY_ACTIVE)
                 );
     }
 
@@ -116,7 +121,8 @@ class MatchingRequestServiceTest {
     @Test
     void gets_my_matching_request() {
         MatchingRequest matchingRequest = matchingRequest();
-        when(matchingRequestRepository.findByRequester_Id(1L)).thenReturn(Optional.of(matchingRequest));
+        when(matchingRequestRepository.findByRequester_IdAndStatus(1L, MatchingRequestStatus.ACTIVE))
+                .thenReturn(Optional.of(matchingRequest));
 
         var response = matchingRequestService.getMine(1L);
 
@@ -129,7 +135,8 @@ class MatchingRequestServiceTest {
 
     @Test
     void rejects_get_when_my_matching_request_not_found() {
-        when(matchingRequestRepository.findByRequester_Id(1L)).thenReturn(Optional.empty());
+        when(matchingRequestRepository.findByRequester_IdAndStatus(1L, MatchingRequestStatus.ACTIVE))
+                .thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> matchingRequestService.getMine(1L))
                 .isInstanceOfSatisfying(BusinessException.class, exception ->
@@ -140,16 +147,26 @@ class MatchingRequestServiceTest {
     @Test
     void cancels_my_matching_request() {
         MatchingRequest matchingRequest = matchingRequest();
-        when(matchingRequestRepository.findByRequester_Id(1L)).thenReturn(Optional.of(matchingRequest));
+        when(matchingRequestRepository.findFirstByRequester_IdAndStatusInOrderByIdDesc(
+                1L,
+                List.of(MatchingRequestStatus.ACTIVE)
+        ))
+                .thenReturn(Optional.of(matchingRequest));
 
         matchingRequestService.cancelMine(1L);
 
-        verify(matchingRequestRepository).delete(matchingRequest);
+        assertThat(matchingRequest.getStatus()).isEqualTo(MatchingRequestStatus.CANCELLED);
+        assertThat(matchingRequest.getEndedAt()).isNotNull();
+        verify(matchingRequestRepository, never()).delete(any(MatchingRequest.class));
     }
 
     @Test
     void rejects_cancel_when_my_matching_request_not_found() {
-        when(matchingRequestRepository.findByRequester_Id(1L)).thenReturn(Optional.empty());
+        when(matchingRequestRepository.findFirstByRequester_IdAndStatusInOrderByIdDesc(
+                1L,
+                List.of(MatchingRequestStatus.ACTIVE)
+        ))
+                .thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> matchingRequestService.cancelMine(1L))
                 .isInstanceOfSatisfying(BusinessException.class, exception ->

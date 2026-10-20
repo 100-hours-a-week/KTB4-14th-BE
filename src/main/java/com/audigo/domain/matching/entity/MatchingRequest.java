@@ -30,6 +30,7 @@ import java.util.Objects;
 public class MatchingRequest {
 
     public static final int MAX_THEME_COUNT = 3;
+    public static final int MAX_RETRY_COUNT = 3;
     private static final int MAX_BUDGET = 3_000_000;
 
     @Id
@@ -53,6 +54,16 @@ public class MatchingRequest {
 
     @Column(name = "budget_max")
     private Integer budgetMax;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false, length = 20)
+    private MatchingRequestStatus status;
+
+    @Column(name = "retry_count", nullable = false)
+    private int retryCount;
+
+    @Column(name = "ended_at")
+    private LocalDateTime endedAt;
 
     @OneToMany(mappedBy = "matchingRequest", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<MatchingRequestTheme> themes = new ArrayList<>();
@@ -80,6 +91,8 @@ public class MatchingRequest {
         validateBudget(budgetMin, budgetMax);
         this.budgetMin = budgetMin;
         this.budgetMax = budgetMax;
+        this.status = MatchingRequestStatus.ACTIVE;
+        this.retryCount = 0;
         addThemes(themes);
     }
 
@@ -111,6 +124,54 @@ public class MatchingRequest {
         if (min == null || max == null || min < 0 || max > MAX_BUDGET || min > max) {
             throw new IllegalArgumentException("예산 범위는 0원 이상 3,000,000원 이하이며 최소 예산은 최대 예산보다 작거나 같아야 합니다.");
         }
+    }
+
+    public void markConnected() {
+        if (status == MatchingRequestStatus.CONNECTED) {
+            return;
+        }
+        if (status != MatchingRequestStatus.ACTIVE && status != MatchingRequestStatus.EXHAUSTED) {
+            throw new IllegalStateException("연결 가능한 매칭 세션이 아닙니다.");
+        }
+        status = MatchingRequestStatus.CONNECTED;
+        endedAt = LocalDateTime.now();
+    }
+
+    public void markExhausted() {
+        finish(MatchingRequestStatus.EXHAUSTED);
+    }
+
+    public void cancel() {
+        finish(MatchingRequestStatus.CANCELLED);
+    }
+
+    public void completeRematch() {
+        if (status != MatchingRequestStatus.ACTIVE) {
+            throw new IllegalStateException("활성 매칭 세션만 재매칭할 수 있습니다.");
+        }
+        if (retryCount >= MAX_RETRY_COUNT) {
+            throw new IllegalStateException("재매칭 가능 횟수를 초과했습니다.");
+        }
+        retryCount++;
+        if (retryCount == MAX_RETRY_COUNT) {
+            markExhausted();
+        }
+    }
+
+    public int getRemainingRetryCount() {
+        return Math.max(0, MAX_RETRY_COUNT - retryCount);
+    }
+
+    public boolean canRematch() {
+        return status == MatchingRequestStatus.ACTIVE && retryCount < MAX_RETRY_COUNT;
+    }
+
+    private void finish(MatchingRequestStatus nextStatus) {
+        if (status != MatchingRequestStatus.ACTIVE) {
+            throw new IllegalStateException("활성 매칭 세션만 종료할 수 있습니다.");
+        }
+        status = nextStatus;
+        endedAt = LocalDateTime.now();
     }
 
     @PrePersist
@@ -151,5 +212,17 @@ public class MatchingRequest {
 
     public List<MatchingRequestTheme> getThemes() {
         return Collections.unmodifiableList(themes);
+    }
+
+    public MatchingRequestStatus getStatus() {
+        return status;
+    }
+
+    public int getRetryCount() {
+        return retryCount;
+    }
+
+    public LocalDateTime getEndedAt() {
+        return endedAt;
     }
 }

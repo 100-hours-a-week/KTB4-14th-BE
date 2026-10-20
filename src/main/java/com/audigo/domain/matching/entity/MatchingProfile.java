@@ -25,6 +25,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 @Entity
 @Table(
@@ -102,8 +103,17 @@ public class MatchingProfile {
         if (normalized.size() > MAX_THEME_COUNT || new HashSet<>(normalized).size() != normalized.size()) {
             throw new IllegalArgumentException("선호 테마는 4개 이하의 중복 없는 값이어야 합니다.");
         }
-        themes.clear();
-        normalized.forEach(theme -> themes.add(MatchingProfileTheme.create(this, theme)));
+
+        HashSet<TravelThemeType> requestedThemes = new HashSet<>(normalized);
+        themes.removeIf(theme -> !requestedThemes.contains(theme.getTheme()));
+
+        HashSet<TravelThemeType> existingThemes = themes.stream()
+                .map(MatchingProfileTheme::getTheme)
+                .collect(Collectors.toCollection(HashSet::new));
+        normalized.stream()
+                .filter(theme -> !existingThemes.contains(theme))
+                .map(theme -> MatchingProfileTheme.create(this, theme))
+                .forEach(themes::add);
     }
 
     @PrePersist
