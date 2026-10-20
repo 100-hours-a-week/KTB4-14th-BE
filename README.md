@@ -8,7 +8,7 @@ AUDIGO backend scaffold.
 - Spring Boot 4.0.6
 - Gradle
 - MySQL 8.4
-- Redis will be added later for refresh token/session storage.
+- Redis 7.4 (prepared for shared chat presence)
 
 ## Domain Package Rule
 
@@ -34,11 +34,14 @@ KAKAO_CLIENT_SECRET=
 KAKAO_REDIRECT_URI=http://localhost:5173/auth/kakao
 ```
 
-## Local MySQL
+## Local MySQL and Redis
 
 ```shell
-docker compose up -d mysql
+docker compose up -d mysql redis
+docker compose exec redis redis-cli ping
 ```
+
+The Redis check should return `PONG`. The backend connects to `localhost:6379` by default; set `AUDIGO_REDIS_HOST` and `AUDIGO_REDIS_PORT` if the shared Redis is elsewhere. Connection and read timeouts default to 2 seconds and can be changed with `AUDIGO_REDIS_CONNECT_TIMEOUT` and `AUDIGO_REDIS_TIMEOUT`.
 
 ## Run
 
@@ -48,7 +51,7 @@ gradle bootRun
 
 If Gradle is not installed on PATH, run `bootRun` from the IntelliJ Gradle tool window after reimporting the project.
 
-Refresh tokens are currently stored in MySQL in `refresh_tokens`. Access tokens are signed JWTs. Move refresh token storage to Redis before production login testing.
+Refresh tokens remain in MySQL in `refresh_tokens`, and access tokens are signed JWTs. Redis is configured for the upcoming chat presence change; login session clustering is not part of this work.
 
 If Hibernate already created old development tables before the ERD column names were aligned, recreate the local schema once:
 
