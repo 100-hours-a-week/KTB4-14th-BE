@@ -2,8 +2,10 @@ package com.audigo.domain.matching.service;
 
 import com.audigo.domain.matching.dto.CreateMatchingRequestRequest;
 import com.audigo.domain.matching.dto.MatchingRequestResponse;
+import com.audigo.domain.matching.entity.MatchingAttemptStatus;
 import com.audigo.domain.matching.entity.MatchingRequest;
 import com.audigo.domain.matching.entity.MatchingRequestStatus;
+import com.audigo.domain.matching.repository.MatchingAttemptRepository;
 import com.audigo.domain.matching.repository.MatchingRequestRepository;
 import com.audigo.domain.travel.entity.TravelThemeType;
 import com.audigo.domain.user.entity.User;
@@ -19,13 +21,16 @@ import org.springframework.transaction.annotation.Transactional;
 public class MatchingRequestService {
 
     private final MatchingRequestRepository matchingRequestRepository;
+    private final MatchingAttemptRepository matchingAttemptRepository;
     private final UserRepository userRepository;
 
     public MatchingRequestService(
             MatchingRequestRepository matchingRequestRepository,
+            MatchingAttemptRepository matchingAttemptRepository,
             UserRepository userRepository
     ) {
         this.matchingRequestRepository = matchingRequestRepository;
+        this.matchingAttemptRepository = matchingAttemptRepository;
         this.userRepository = userRepository;
     }
 
@@ -49,7 +54,16 @@ public class MatchingRequestService {
 
     @Transactional(readOnly = true)
     public MatchingRequestResponse getMine(Long userId) {
-        return MatchingRequestResponse.from(findMine(userId));
+        MatchingRequest request = findMine(userId);
+        MatchingAttemptStatus latestAttemptStatus = matchingAttemptRepository
+                .findFirstByMatchingRequest_IdOrderByIdDesc(request.getId())
+                .map(attempt -> attempt.getStatus())
+                .orElse(null);
+        boolean hasResult = matchingAttemptRepository.existsByMatchingRequest_IdAndStatus(
+                request.getId(),
+                MatchingAttemptStatus.SUCCEEDED
+        );
+        return MatchingRequestResponse.from(request, latestAttemptStatus, hasResult);
     }
 
     @Transactional
@@ -63,8 +77,13 @@ public class MatchingRequestService {
     }
 
     private MatchingRequest findMine(Long userId) {
-        return matchingRequestRepository.findByRequester_IdAndStatus(userId, MatchingRequestStatus.ACTIVE)
+        MatchingRequest request = matchingRequestRepository.findFirstByRequester_IdOrderByIdDesc(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.MATCHING_REQUEST_NOT_FOUND));
+        if (request.getStatus() != MatchingRequestStatus.ACTIVE
+                && request.getStatus() != MatchingRequestStatus.EXHAUSTED) {
+            throw new BusinessException(ErrorCode.MATCHING_REQUEST_NOT_FOUND);
+        }
+        return request;
     }
 
     private void validate(CreateMatchingRequestRequest request) {

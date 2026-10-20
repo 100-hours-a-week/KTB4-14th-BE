@@ -128,6 +128,30 @@ class MatchingAttemptServiceTest {
         assertThat(request.getRetryCount()).isZero();
     }
 
+    @Test
+    void restores_last_successful_candidates_from_exhausted_request() {
+        MatchingRequest request = matchingRequest();
+        request.completeRematch();
+        request.completeRematch();
+        request.completeRematch();
+        MatchingAttempt previous = MatchingAttempt.start(request, 3);
+        previous.succeed(List.of(new MatchingAttempt.CandidateScore(22L, 90)));
+        when(matchingRequestRepository.findLatestByRequesterIdForUpdate(1L))
+                .thenReturn(Optional.of(request));
+        when(matchingAttemptRepository.findFirstByMatchingRequest_IdAndStatusOrderByIdDesc(
+                10L,
+                MatchingAttemptStatus.SUCCEEDED
+        )).thenReturn(Optional.of(previous));
+
+        MatchingAttemptService.AttemptPreparation result = matchingAttemptService.prepareInitial(1L);
+
+        assertThat(result.cached()).isTrue();
+        assertThat(result.cachedCandidates()).containsExactly(
+                new MatchingAttemptService.StoredCandidate(22L, 90)
+        );
+        verify(matchingAttemptRepository, never()).save(any());
+    }
+
     private void stubActiveRequest(MatchingRequest request) {
         when(matchingRequestRepository.findFirstByRequester_IdAndStatusInOrderByIdDesc(
                 1L,

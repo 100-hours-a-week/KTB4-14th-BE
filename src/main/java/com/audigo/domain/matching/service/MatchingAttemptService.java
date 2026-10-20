@@ -36,10 +36,13 @@ public class MatchingAttemptService {
 
     @Transactional
     public AttemptPreparation prepareInitial(Long userId) {
-        MatchingRequest request = findActiveRequestForUpdate(userId);
+        MatchingRequest request = findRestorableRequestForUpdate(userId);
         MatchingAttempt latest = findLatestSuccessful(request.getId());
         if (latest != null) {
             return AttemptPreparation.cached(request, storedCandidates(latest));
+        }
+        if (request.getStatus() != MatchingRequestStatus.ACTIVE) {
+            throw new BusinessException(ErrorCode.MATCHING_REQUEST_NOT_FOUND);
         }
         ensureNoAttemptInProgress(request.getId());
         MatchingAttempt attempt = matchingAttemptRepository.save(MatchingAttempt.start(request, 0));
@@ -102,6 +105,19 @@ public class MatchingAttemptService {
                         List.of(MatchingRequestStatus.ACTIVE)
                 )
                 .orElseThrow(() -> new BusinessException(ErrorCode.MATCHING_REQUEST_NOT_FOUND));
+        request.getThemes().size();
+        request.getRequester().id();
+        return request;
+    }
+
+    private MatchingRequest findRestorableRequestForUpdate(Long userId) {
+        MatchingRequest request = matchingRequestRepository
+                .findLatestByRequesterIdForUpdate(userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.MATCHING_REQUEST_NOT_FOUND));
+        if (request.getStatus() != MatchingRequestStatus.ACTIVE
+                && request.getStatus() != MatchingRequestStatus.EXHAUSTED) {
+            throw new BusinessException(ErrorCode.MATCHING_REQUEST_NOT_FOUND);
+        }
         request.getThemes().size();
         request.getRequester().id();
         return request;
