@@ -150,6 +150,7 @@ class MatchingRequestServiceTest {
         assertThat(response.remainingRetryCount()).isEqualTo(3);
         assertThat(response.canRematch()).isTrue();
         assertThat(response.hasResult()).isTrue();
+        assertThat(response.canRetry()).isFalse();
     }
 
     @Test
@@ -204,10 +205,7 @@ class MatchingRequestServiceTest {
     @Test
     void cancels_my_matching_request() {
         MatchingRequest matchingRequest = matchingRequest();
-        when(matchingRequestRepository.findFirstByRequester_IdAndStatusInOrderByIdDesc(
-                1L,
-                List.of(MatchingRequestStatus.ACTIVE)
-        ))
+        when(matchingRequestRepository.findLatestByRequesterIdForUpdate(1L))
                 .thenReturn(Optional.of(matchingRequest));
 
         matchingRequestService.cancelMine(1L);
@@ -219,16 +217,122 @@ class MatchingRequestServiceTest {
 
     @Test
     void rejects_cancel_when_my_matching_request_not_found() {
-        when(matchingRequestRepository.findFirstByRequester_IdAndStatusInOrderByIdDesc(
-                1L,
-                List.of(MatchingRequestStatus.ACTIVE)
-        ))
+        when(matchingRequestRepository.findLatestByRequesterIdForUpdate(1L))
                 .thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> matchingRequestService.cancelMine(1L))
                 .isInstanceOfSatisfying(BusinessException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.MATCHING_REQUEST_NOT_FOUND)
                 );
+    }
+
+    @Test
+    void exposes_first_failure_as_retryable_without_successful_result() {
+        MatchingRequest request = matchingRequest();
+        MatchingAttempt failed = MatchingAttempt.start(request, 0);
+        failed.fail("AI timeout");
+        when(matchingRequestRepository.findFirstByRequester_IdOrderByIdDesc(1L))
+                .thenReturn(Optional.of(request));
+        when(matchingAttemptRepository.findFirstByMatchingRequest_IdOrderByIdDesc(10L))
+                .thenReturn(Optional.of(failed));
+
+        var response = matchingRequestService.getMine(1L);
+
+        assertThat(response.latestAttemptStatus()).isEqualTo(MatchingAttemptStatus.FAILED);
+        assertThat(response.hasResult()).isFalse();
+        assertThat(response.canRetry()).isTrue();
+        assertThat(response.remainingRetryCount()).isEqualTo(3);
+    }
+
+    @Test
+    void exposes_failed_rematch_with_previous_result_and_unchanged_retry_count() {
+        MatchingRequest request = matchingRequest();
+        request.completeRematch();
+        MatchingAttempt failed = MatchingAttempt.start(request, 2);
+        failed.fail("AI timeout");
+        when(matchingRequestRepository.findFirstByRequester_IdOrderByIdDesc(1L))
+                .thenReturn(Optional.of(request));
+        when(matchingAttemptRepository.findFirstByMatchingRequest_IdOrderByIdDesc(10L))
+                .thenReturn(Optional.of(failed));
+        when(matchingAttemptRepository.existsByMatchingRequest_IdAndStatus(10L, MatchingAttemptStatus.SUCCEEDED))
+                .thenReturn(true);
+
+        var response = matchingRequestService.getMine(1L);
+
+        assertThat(response.latestAttemptStatus()).isEqualTo(MatchingAttemptStatus.FAILED);
+        assertThat(response.hasResult()).isTrue();
+        assertThat(response.canRetry()).isTrue();
+        assertThat(response.retryCount()).isEqualTo(1);
+        assertThat(response.remainingRetryCount()).isEqualTo(2);
+    }
+
+    @Test
+    void processing_attempt_is_not_retryable() {
+        MatchingRequest request = matchingRequest();
+        when(matchingRequestRepository.findFirstByRequester_IdOrderByIdDesc(1L))
+                .thenReturn(Optional.of(request));
+        when(matchingAttemptRepository.findFirstByMatchingRequest_IdOrderByIdDesc(10L))
+                .thenReturn(Optional.of(MatchingAttempt.start(request, 0)));
+
+        var response = matchingRequestService.getMine(1L);
+
+        assertThat(response.latestAttemptStatus()).isEqualTo(MatchingAttemptStatus.PROCESSING);
+        assertThat(response.canRetry()).isFalse();
+    }
+
+    @Test
+    void cancellation_fails_processing_attempts_and_keeps_request_history() {
+        MatchingRequest request = matchingRequest();
+        MatchingAttempt attempt = MatchingAttempt.start(request, 0);
+        when(matchingRequestRepository.findLatestByRequesterIdForUpdate(1L))
+                .thenReturn(Optional.of(request));
+        when(matchingAttemptRepository.findAllByMatchingRequest_IdAndStatus(10L, MatchingAttemptStatus.PROCESSING))
+                .thenReturn(List.of(attempt));
+
+        matchingRequestService.cancelMine(1L);
+
+        assertThat(request.getStatus()).isEqualTo(MatchingRequestStatus.CANCELLED);
+        assertThat(attempt.getStatus()).isEqualTo(MatchingAttemptStatus.FAILED);
+        assertThat(attempt.getCandidates()).isEmpty();
+        assertThat(request.getRetryCount()).isZero();
+        verify(matchingRequestRepository, never()).delete(any(MatchingRequest.class));
+    }
+
+    @Test
+    void cancels_exhausted_request_so_it_is_not_restored_on_reentry() {
+        MatchingRequest request = matchingRequest();
+        request.completeRematch();
+        request.completeRematch();
+        request.completeRematch();
+        when(matchingRequestRepository.findLatestByRequesterIdForUpdate(1L))
+                .thenReturn(Optional.of(request));
+
+        matchingRequestService.cancelMine(1L);
+
+        assertThat(request.getStatus()).isEqualTo(MatchingRequestStatus.CANCELLED);
+        assertThat(request.getRetryCount()).isEqualTo(3);
+    }
+
+    @Test
+    void creates_new_request_after_cancelling_failed_session() {
+        MatchingRequest previous = matchingRequest();
+        MatchingAttempt failed = MatchingAttempt.start(previous, 0);
+        failed.fail("AI timeout");
+        when(matchingRequestRepository.findLatestByRequesterIdForUpdate(1L))
+                .thenReturn(Optional.of(previous));
+        matchingRequestService.cancelMine(1L);
+
+        when(userRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(activeUser()));
+        when(matchingRequestRepository.existsByRequester_IdAndStatus(1L, MatchingRequestStatus.ACTIVE))
+                .thenAnswer(invocation -> previous.getStatus() == MatchingRequestStatus.ACTIVE);
+        when(matchingRequestRepository.save(any(MatchingRequest.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        var response = matchingRequestService.create(1L, validRequest());
+
+        assertThat(previous.getStatus()).isEqualTo(MatchingRequestStatus.CANCELLED);
+        assertThat(response.status()).isEqualTo(MatchingRequestStatus.ACTIVE);
+        assertThat(response.retryCount()).isZero();
     }
 
     private CreateMatchingRequestRequest validRequest() {

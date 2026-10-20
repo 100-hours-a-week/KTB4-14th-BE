@@ -23,7 +23,8 @@ public record MatchingRequestResponse(
         @JsonProperty("retry_count") int retryCount,
         @JsonProperty("remaining_retry_count") int remainingRetryCount,
         @JsonProperty("can_rematch") boolean canRematch,
-        @JsonProperty("has_result") boolean hasResult
+        @JsonProperty("has_result") boolean hasResult,
+        @JsonProperty("can_retry") boolean canRetry
 ) {
 
     public static MatchingRequestResponse from(MatchingRequest request) {
@@ -48,7 +49,9 @@ public record MatchingRequestResponse(
                 request.getRetryCount(),
                 request.getRemainingRetryCount(),
                 request.canRematch(),
-                hasResult
+                hasResult,
+                request.getStatus() == MatchingRequestStatus.ACTIVE
+                        && latestAttemptStatus == MatchingAttemptStatus.FAILED
         );
     }
 }
