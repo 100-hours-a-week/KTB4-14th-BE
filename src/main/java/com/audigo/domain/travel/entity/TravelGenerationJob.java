@@ -16,7 +16,7 @@ import jakarta.persistence.Table;
 import java.time.LocalDateTime;
 import java.util.Objects;
 
-// 단계별 결과는 SSE가 연결된 동안 메모리에서 처리하고, 이 엔티티에는 ERD에 정의된 작업 단위와 전체 성공·실패 상태만 저장
+// 사용자용 여행 상태와 별도로 큐 대기·실행 상태와 실제 처리 시간을 관리
 @Entity
 @Table(name = "ai_generation_jobs")
 public class TravelGenerationJob {
@@ -37,10 +37,14 @@ public class TravelGenerationJob {
     @Column(name = "status", nullable = false, length = 30)
     private TravelPlanStatus status;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "execution_status", nullable = false, length = 30)
+    private TravelGenerationExecutionStatus executionStatus;
+
     @Column(name = "error_message", length = 255)
     private String errorMessage;
 
-    @Column(name = "started_at", nullable = false)
+    @Column(name = "started_at")
     private LocalDateTime startedAt;
 
     @Column(name = "ended_at")
@@ -56,6 +60,7 @@ public class TravelGenerationJob {
         this.travelPlan = Objects.requireNonNull(travelPlan, "여행 계획은 필수입니다.");
         this.jobType = Objects.requireNonNull(jobType, "생성 작업 유형은 필수입니다.");
         this.status = TravelPlanStatus.GENERATING;
+        this.executionStatus = TravelGenerationExecutionStatus.QUEUED;
     }
 
     public static TravelGenerationJob create(TravelPlan travelPlan) {
@@ -64,6 +69,7 @@ public class TravelGenerationJob {
 
     public void markStarted() {
         this.status = TravelPlanStatus.GENERATING;
+        this.executionStatus = TravelGenerationExecutionStatus.PROCESSING;
         this.errorMessage = null;
         this.endedAt = null;
         if (this.startedAt == null) {
@@ -73,12 +79,14 @@ public class TravelGenerationJob {
 
     public void complete() {
         this.status = TravelPlanStatus.COMPLETED;
+        this.executionStatus = TravelGenerationExecutionStatus.COMPLETED;
         this.errorMessage = null;
         this.endedAt = LocalDateTime.now();
     }
 
     public void fail(String message) {
         this.status = TravelPlanStatus.FAILED;
+        this.executionStatus = TravelGenerationExecutionStatus.FAILED;
         this.errorMessage = normalizeErrorMessage(message);
         this.endedAt = LocalDateTime.now();
     }
@@ -95,15 +103,24 @@ public class TravelGenerationJob {
     protected void onCreate() {
         LocalDateTime now = LocalDateTime.now();
         this.createdAt = now;
-        if (this.startedAt == null) {
-            this.startedAt = now;
+        if (this.executionStatus == null) {
+            this.executionStatus = TravelGenerationExecutionStatus.QUEUED;
         }
     }
 
     @PreUpdate
     protected void onUpdate() {
-        if (this.status == TravelPlanStatus.GENERATING && this.startedAt == null) {
-            this.startedAt = LocalDateTime.now();
+        if (this.executionStatus != null) {
+            return;
+        }
+        if (this.status == TravelPlanStatus.COMPLETED) {
+            this.executionStatus = TravelGenerationExecutionStatus.COMPLETED;
+        } else if (this.status == TravelPlanStatus.FAILED) {
+            this.executionStatus = TravelGenerationExecutionStatus.FAILED;
+        } else if (this.startedAt == null) {
+            this.executionStatus = TravelGenerationExecutionStatus.QUEUED;
+        } else {
+            this.executionStatus = TravelGenerationExecutionStatus.PROCESSING;
         }
     }
 
@@ -121,6 +138,10 @@ public class TravelGenerationJob {
 
     public TravelPlanStatus getStatus() {
         return status;
+    }
+
+    public TravelGenerationExecutionStatus getExecutionStatus() {
+        return executionStatus;
     }
 
     public String getErrorMessage() {

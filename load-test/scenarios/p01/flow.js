@@ -8,11 +8,16 @@ import { requireField } from '../../lib/test-data.js';
 import { recordP01ApiResponse } from './metrics.js';
 
 const creationRequest = JSON.parse(open(__ENV.CREATE_REQUEST_FILE || '../../data/create-request.json'));
+const creationPath = __ENV.P01_CREATION_PATH || '/api/travel-plans';
 const pollIntervalSeconds = positiveInteger('P01_POLL_INTERVAL_SECONDS', 1);
 const pollTimeoutSeconds = positiveInteger('P01_POLL_TIMEOUT_SECONDS', 300);
 
 requireWriteConfirmation();
 requireAiMockConfirmation();
+
+if (!['/api/travel-plans', '/api/v2/travel-plans'].includes(creationPath)) {
+    throw new Error('P01_CREATION_PATH must be /api/travel-plans or /api/v2/travel-plans');
+}
 
 export const creationAttempts = new Counter('p01_creation_attempts');
 export const generationCompleted = new Counter('p01_generation_completed');
@@ -35,7 +40,7 @@ export function runP01GenerationFlow(user) {
         requireSuccess(get('/api/regions', 'LT-04', token, 'regions'), 200, 'region lookup', 'regions');
 
         creationAttempts.add(1);
-        const created = post('/api/travel-plans', creationRequest, 'LT-04', token, 'travel_plan_create');
+        const created = post(creationPath, creationRequest, 'LT-04', token, 'travel_plan_create');
         requireSuccess(created, 202, 'travel plan creation', 'travel_plan_create');
 
         const createdData = responseData(created);

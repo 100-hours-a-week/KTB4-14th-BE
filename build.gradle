@@ -16,6 +16,8 @@ java {
 }
 
 dependencies {
+    implementation platform('software.amazon.awssdk:bom:2.56.0')
+
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-data-redis'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
@@ -25,7 +27,10 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
     implementation 'org.springframework.boot:spring-boot-starter-websocket'
     implementation 'com.fasterxml.jackson.core:jackson-databind'
+    implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
     implementation 'org.jsoup:jsoup:1.18.3'
+    implementation 'software.amazon.awssdk:sqs'
+    implementation 'software.amazon.awssdk:url-connection-client'
 
     runtimeOnly 'com.mysql:mysql-connector-j'
     runtimeOnly 'io.micrometer:micrometer-registry-prometheus'

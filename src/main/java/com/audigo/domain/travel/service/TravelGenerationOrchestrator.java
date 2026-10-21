@@ -11,6 +11,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 // 여행 생성 요청과 AI SSE 작업 사이의 조정 계층
 @Service
@@ -21,7 +23,7 @@ public class TravelGenerationOrchestrator {
     private final TravelPlanRepository travelPlanRepository;
     private final TravelGenerationJobService jobService;
     private final TravelGenerationRequestFactory requestFactory;
-    private final TravelGenerationContextStore contextStore;
+    private final TravelGenerationPayloadStore payloadStore;
     private final TravelGenerationProgressStore progressStore;
     private final TravelGenerationWorker worker;
 
@@ -29,14 +31,14 @@ public class TravelGenerationOrchestrator {
             TravelPlanRepository travelPlanRepository,
             TravelGenerationJobService jobService,
             TravelGenerationRequestFactory requestFactory,
-            TravelGenerationContextStore contextStore,
+            TravelGenerationPayloadStore payloadStore,
             TravelGenerationProgressStore progressStore,
             TravelGenerationWorker worker
     ) {
         this.travelPlanRepository = travelPlanRepository;
         this.jobService = jobService;
         this.requestFactory = requestFactory;
-        this.contextStore = contextStore;
+        this.payloadStore = payloadStore;
         this.progressStore = progressStore;
         this.worker = worker;
     }
@@ -73,13 +75,26 @@ public class TravelGenerationOrchestrator {
         progressStore.initialize(job.getId());
         try {
             AiTravelGenerationRequest aiRequest = requestFactory.from(plan, request);
-            contextStore.put(job.getId(), aiRequest);
+            payloadStore.saveRequest(job.getId(), aiRequest);
         } catch (RuntimeException exception) {
             log.warn("AI 생성 요청에 필요한 장소 정보를 준비하지 못했습니다. jobId={}", job.getId(), exception);
             jobService.markFailed(job.getId(), "AI 생성에 필요한 장소 정보를 불러오지 못했습니다.");
             return job.getId();
         }
-        worker.run(job.getId());
+        runWorkerAfterCommit(job.getId());
         return job.getId();
+    }
+
+    private void runWorkerAfterCommit(Long jobId) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()) {
+            worker.run(jobId);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                worker.run(jobId);
+            }
+        });
     }
 }
