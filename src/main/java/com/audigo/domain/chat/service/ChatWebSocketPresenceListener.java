@@ -11,9 +11,14 @@ import org.springframework.web.socket.messaging.SessionDisconnectEvent;
 public class ChatWebSocketPresenceListener {
 
     private final ChatPresenceRegistry chatPresenceRegistry;
+    private final ChatPresenceNotificationService chatPresenceNotificationService;
 
-    public ChatWebSocketPresenceListener(ChatPresenceRegistry chatPresenceRegistry) {
+    public ChatWebSocketPresenceListener(
+            ChatPresenceRegistry chatPresenceRegistry,
+            ChatPresenceNotificationService chatPresenceNotificationService
+    ) {
         this.chatPresenceRegistry = chatPresenceRegistry;
+        this.chatPresenceNotificationService = chatPresenceNotificationService;
     }
 
     @EventListener
@@ -33,12 +38,13 @@ public class ChatWebSocketPresenceListener {
         try {
             Long userId = Long.parseLong(principal.getName());
             if (connected) {
-                chatPresenceRegistry.connected(userId, sessionId);
-            } else {
-                chatPresenceRegistry.disconnected(userId, sessionId);
+                if (chatPresenceRegistry.connected(userId, sessionId)) {
+                    chatPresenceNotificationService.publishStatusChange(userId, true);
+                }
+            } else if (chatPresenceRegistry.disconnected(userId, sessionId)) {
+                chatPresenceNotificationService.publishStatusChange(userId, false);
             }
         } catch (NumberFormatException ignored) {
-            // Only authenticated application users are registered in chat presence.
         }
     }
 }
