@@ -7,17 +7,21 @@ import com.audigo.domain.travel.entity.TravelGenerationStage;
 import com.audigo.domain.travel.entity.TravelGenerationStageState;
 import com.audigo.domain.travel.entity.TravelPaceType;
 import com.audigo.domain.travel.entity.TravelTransportType;
+import com.audigo.global.config.JacksonConfig;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.json.JsonMapper;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.context.junit.jupiter.SpringJUnitConfig;
 
+@SpringJUnitConfig(JacksonConfig.class)
 class TravelGenerationMessageTest {
 
-    private final ObjectMapper objectMapper = JsonMapper.builder().findAndAddModules().build();
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @Test
     void Job_메시지는_AI_요청_전체를_포함해_직렬화되고_복원된다() throws Exception {
@@ -35,6 +39,28 @@ class TravelGenerationMessageTest {
         assertThat(objectMapper.readTree(json).path("generation_job_id").asLong()).isEqualTo(41L);
         assertThat(objectMapper.readTree(json).path("request").path("required_places")).hasSize(1);
         assertThat(restored).isEqualTo(message);
+    }
+
+    @Test
+    void Job_메시지의_일시와_발생시각은_ISO_문자열로_전달된다() throws Exception {
+        TravelGenerationJobMessage message = new TravelGenerationJobMessage(
+                "event-job-iso",
+                41L,
+                TravelGenerationMessageVersion.V1,
+                Instant.parse("2026-10-16T01:00:00Z"),
+                request()
+        );
+
+        var json = objectMapper.readTree(objectMapper.writeValueAsString(message));
+        var arrival = json.path("request").path("arrival_datetime");
+        var departure = json.path("request").path("departure_datetime");
+
+        assertThat(arrival.isTextual()).isTrue();
+        assertThat(arrival.textValue()).isEqualTo("2026-10-20T10:00:00");
+        assertThat(departure.isTextual()).isTrue();
+        assertThat(departure.textValue()).isEqualTo("2026-10-22T18:00:00");
+        assertThat(json.path("occurred_at").isTextual()).isTrue();
+        assertThat(json.path("occurred_at").textValue()).isEqualTo("2026-10-16T01:00:00Z");
     }
 
     @Test

@@ -12,20 +12,25 @@ import com.audigo.domain.travel.entity.TravelGenerationJob;
 import com.audigo.domain.travel.entity.TravelGenerationOutbox;
 import com.audigo.domain.travel.messaging.TravelGenerationJobMessage;
 import com.audigo.domain.travel.repository.TravelGenerationOutboxRepository;
+import com.audigo.global.config.JacksonConfig;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.json.JsonMapper;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.context.junit.jupiter.SpringJUnitConfig;
 
+@SpringJUnitConfig(JacksonConfig.class)
 class TravelGenerationOutboxStoreTest {
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @Test
     void 최초_Job_메시지_JSON을_Outbox에_그대로_저장한다() throws Exception {
         TravelGenerationOutboxRepository repository = mock(TravelGenerationOutboxRepository.class);
-        ObjectMapper objectMapper = JsonMapper.builder().findAndAddModules().build();
         TravelGenerationOutboxStore store = new TravelGenerationOutboxStore(
                 repository,
                 new TravelOutboxProperties(10, 5, 300, 120),
@@ -56,6 +61,11 @@ class TravelGenerationOutboxStoreTest {
         verify(repository).save(captor.capture());
         TravelGenerationOutbox saved = captor.getValue();
         assertThat(saved.getEventId()).isEqualTo("event-1");
+        var savedRequest = objectMapper.readTree(saved.getPayload()).path("request");
+        assertThat(savedRequest.path("arrival_datetime").isTextual()).isTrue();
+        assertThat(savedRequest.path("arrival_datetime").textValue()).isEqualTo("2026-10-20T10:00:00");
+        assertThat(savedRequest.path("departure_datetime").isTextual()).isTrue();
+        assertThat(savedRequest.path("departure_datetime").textValue()).isEqualTo("2026-10-22T18:00:00");
         assertThat(objectMapper.readValue(saved.getPayload(), TravelGenerationJobMessage.class))
                 .isEqualTo(message);
     }
@@ -66,7 +76,7 @@ class TravelGenerationOutboxStoreTest {
         TravelGenerationOutboxStore store = new TravelGenerationOutboxStore(
                 repository,
                 new TravelOutboxProperties(10, 5, 300, 120),
-                JsonMapper.builder().findAndAddModules().build()
+                objectMapper
         );
         TravelGenerationOutbox event = TravelGenerationOutbox.create(
                 mock(TravelGenerationJob.class),
