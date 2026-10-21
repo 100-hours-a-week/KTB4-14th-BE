@@ -8,7 +8,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 
-// AI 서버에 전달하는 내부 요청 DTO, 장소 상세값은 DB가 아닌 메모리에서만 유지
+// AI 서버에 전달하고 재시도 시 복원할 수 있도록 작업별 스냅샷으로 저장하는 내부 요청 DTO
 public record AiTravelGenerationRequest(
         @JsonProperty("travel_plan_id") Long travelPlanId,
         @JsonProperty("region_id") Long regionId,

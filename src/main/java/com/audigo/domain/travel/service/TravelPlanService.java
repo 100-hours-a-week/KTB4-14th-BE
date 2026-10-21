@@ -11,6 +11,7 @@ import com.audigo.domain.travel.entity.PlaceProvider;
 import com.audigo.domain.travel.entity.TravelPlaceSource;
 import com.audigo.domain.travel.entity.TravelPlanPlace;
 import com.audigo.domain.travel.entity.Region;
+import com.audigo.domain.travel.entity.TravelGenerationJob;
 import com.audigo.domain.travel.entity.TravelPlan;
 import com.audigo.domain.travel.entity.TravelPlanStatus;
 import com.audigo.domain.travel.entity.TravelPreference;
@@ -118,6 +119,11 @@ public class TravelPlanService {
     // 여행 생성하기 요청(1단계)
     @Transactional
     public TravelPlan createTravelPlan(Long userId, TravelPlanRequest request) {
+        return createTravelPlanWithGenerationJob(userId, request).getTravelPlan();
+    }
+
+    @Transactional
+    public TravelGenerationJob createTravelPlanWithGenerationJob(Long userId, TravelPlanRequest request) {
         validateRequest(request);
         if (travelGenerationJobRepository.existsByTravelPlanUserIdAndStatus(
                 userId,
@@ -143,22 +149,25 @@ public class TravelPlanService {
 
         addRequiredPlaces(travelPlan, request.requiredPlaces());
         TravelPlan savedPlan = travelPlanRepository.save(travelPlan);
-        travelGenerationJobRepository.save(com.audigo.domain.travel.entity.TravelGenerationJob.create(savedPlan));
-        return savedPlan;
+        return travelGenerationJobRepository.save(TravelGenerationJob.create(savedPlan));
     }
 
     @Transactional
     public TravelPlan regenerateTravelPlan(Long userId, Long travelPlanId) {
+        return regenerateTravelPlanWithGenerationJob(userId, travelPlanId).getTravelPlan();
+    }
+
+    @Transactional
+    public TravelGenerationJob regenerateTravelPlanWithGenerationJob(Long userId, Long travelPlanId) {
         TravelPlan travelPlan = travelPlanRepository.findByIdAndUserId(travelPlanId, userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.VALIDATION_FAILED));
         travelGenerationJobRepository.findTopByTravelPlanIdOrderByIdDesc(travelPlanId)
-                .filter(job -> job.getStatus() == com.audigo.domain.travel.entity.TravelPlanStatus.GENERATING)
+                .filter(job -> job.getStatus() == TravelPlanStatus.GENERATING)
                 .ifPresent(job -> {
                     throw new BusinessException(ErrorCode.VALIDATION_FAILED);
                 });
         travelPlan.restartGeneration();
-        travelGenerationJobRepository.save(com.audigo.domain.travel.entity.TravelGenerationJob.create(travelPlan));
-        return travelPlan;
+        return travelGenerationJobRepository.save(TravelGenerationJob.create(travelPlan));
     }
 
     private void addRequiredPlaces(TravelPlan travelPlan, List<RequiredPlaceRequest> requests) {
