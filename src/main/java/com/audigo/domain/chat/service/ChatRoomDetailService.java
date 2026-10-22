@@ -21,14 +21,14 @@ public class ChatRoomDetailService {
     private static final int DEFAULT_SIZE = 20;
 
     private final ChatRoomDetailRepository chatRoomDetailRepository;
-    private final ChatPresenceRegistry chatPresenceRegistry;
+    private final ChatPresenceQueryService chatPresenceQueryService;
 
     public ChatRoomDetailService(
             ChatRoomDetailRepository chatRoomDetailRepository,
-            ChatPresenceRegistry chatPresenceRegistry
+            ChatPresenceQueryService chatPresenceQueryService
     ) {
         this.chatRoomDetailRepository = chatRoomDetailRepository;
-        this.chatPresenceRegistry = chatPresenceRegistry;
+        this.chatPresenceQueryService = chatPresenceQueryService;
     }
 
     @Transactional(readOnly = true)
@@ -73,7 +73,7 @@ public class ChatRoomDetailService {
                         room.opponentUserId(),
                         room.opponentChatName(),
                         room.opponentProfileImageUrl(),
-                        chatPresenceRegistry.isOnline(room.opponentUserId())
+                        chatPresenceQueryService.isOnline(room.opponentUserId())
                 ),
                 chats,
                 chats.size(),
