@@ -32,7 +32,7 @@ class ChatRoomDetailServiceTest {
     private ChatRoomDetailRepository chatRoomDetailRepository;
 
     @Mock
-    private ChatPresenceRegistry chatPresenceRegistry;
+    private ChatPresenceQueryService chatPresenceQueryService;
 
     @InjectMocks
     private ChatRoomDetailService chatRoomDetailService;
@@ -46,7 +46,7 @@ class ChatRoomDetailServiceTest {
                 new MessageDetailRow(102L, 2L, "상대 메시지", oldestSentAt.plusMinutes(1), true),
                 new MessageDetailRow(101L, 1L, "내 메시지", oldestSentAt, false)
         ));
-        when(chatPresenceRegistry.isOnline(2L)).thenReturn(true);
+        when(chatPresenceQueryService.isOnline(2L)).thenReturn(true);
 
         ChatRoomDetailResponse response = chatRoomDetailService.getDetail(
                 1L,
@@ -67,6 +67,7 @@ class ChatRoomDetailServiceTest {
         assertThat(response.chatCursorId()).isNull();
         assertThat(response.hasNext()).isFalse();
         verify(chatRoomDetailRepository).findMessages(54L, 1L, 2L, null, null, 3);
+        verify(chatPresenceQueryService).isOnline(2L);
     }
 
     @Test
@@ -125,6 +126,7 @@ class ChatRoomDetailServiceTest {
                 );
 
         verify(chatRoomDetailRepository, never()).findMessages(54L, 1L, 2L, null, null, 21);
+        verify(chatPresenceQueryService, never()).isOnline(2L);
     }
 
     private RoomDetailRow room(ChatRoomStatus status) {

@@ -33,7 +33,7 @@ class ChatRoomListServiceTest {
     private ChatMessageListRepository chatMessageListRepository;
 
     @Mock
-    private ChatPresenceRegistry chatPresenceRegistry;
+    private ChatPresenceQueryService chatPresenceQueryService;
 
     @InjectMocks
     private ChatRoomListService chatRoomListService;
@@ -47,7 +47,7 @@ class ChatRoomListServiceTest {
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.INVALID_REQUEST)
                 );
 
-        verifyNoInteractions(chatRoomListRepository, chatMessageListRepository, chatPresenceRegistry);
+        verifyNoInteractions(chatRoomListRepository, chatMessageListRepository, chatPresenceQueryService);
     }
 
     @Test
@@ -62,24 +62,29 @@ class ChatRoomListServiceTest {
     }
 
     @Test
-    void includes_opponent_online_state_from_the_presence_registry() {
+    void includes_opponent_online_state_from_redis_batch_statuses() {
         LocalDateTime lastMessageAt = LocalDateTime.of(2026, 10, 1, 9, 0);
         when(chatRoomListRepository.findPage(7L, null, null, null, 21)).thenReturn(List.of(
-                new ChatRoomListRow(54L, 2L, "민지", ChatRoomStatus.ACTIVE, lastMessageAt, null)
+                new ChatRoomListRow(54L, 2L, "민지", ChatRoomStatus.ACTIVE, lastMessageAt, null),
+                new ChatRoomListRow(55L, 3L, "서연", ChatRoomStatus.ACTIVE, lastMessageAt, null),
+                new ChatRoomListRow(56L, 2L, "민지", ChatRoomStatus.ACTIVE, lastMessageAt, null)
         ));
-        when(chatMessageListRepository.findLatestMessages(List.of(54L)))
-                .thenReturn(Map.of(54L, "안녕하세요"));
-        when(chatMessageListRepository.countUnreadMessages(List.of(54L), 7L))
-                .thenReturn(Map.of(54L, 1L));
-        when(chatPresenceRegistry.isOnline(2L)).thenReturn(true);
+        when(chatMessageListRepository.findLatestMessages(List.of(54L, 55L, 56L)))
+                .thenReturn(Map.of(54L, "안녕하세요", 55L, "반가워요", 56L, "다시 만나요"));
+        when(chatMessageListRepository.countUnreadMessages(List.of(54L, 55L, 56L), 7L))
+                .thenReturn(Map.of(54L, 1L, 55L, 0L, 56L, 2L));
+        when(chatPresenceQueryService.findOnlineStatuses(List.of(2L, 3L)))
+                .thenReturn(Map.of(2L, true, 3L, false));
 
         ChatRoomListResponse response = chatRoomListService.list(
                 7L,
                 new ChatRoomListQuery(null, null, null, null)
         );
 
-        assertThat(response.rooms()).hasSize(1);
+        assertThat(response.rooms()).hasSize(3);
         assertThat(response.rooms().getFirst().isOnline()).isTrue();
-        verify(chatPresenceRegistry).isOnline(2L);
+        assertThat(response.rooms().get(1).isOnline()).isFalse();
+        assertThat(response.rooms().get(2).isOnline()).isTrue();
+        verify(chatPresenceQueryService).findOnlineStatuses(List.of(2L, 3L));
     }
 }
