@@ -10,41 +10,33 @@ import org.springframework.web.socket.messaging.SessionDisconnectEvent;
 @Component
 public class ChatWebSocketPresenceListener {
 
-    private final ChatPresenceRegistry chatPresenceRegistry;
-    private final ChatPresenceNotificationService chatPresenceNotificationService;
+    private final ChatPresenceConnectionManager chatPresenceConnectionManager;
 
-    public ChatWebSocketPresenceListener(
-            ChatPresenceRegistry chatPresenceRegistry,
-            ChatPresenceNotificationService chatPresenceNotificationService
-    ) {
-        this.chatPresenceRegistry = chatPresenceRegistry;
-        this.chatPresenceNotificationService = chatPresenceNotificationService;
+    public ChatWebSocketPresenceListener(ChatPresenceConnectionManager chatPresenceConnectionManager) {
+        this.chatPresenceConnectionManager = chatPresenceConnectionManager;
     }
 
     @EventListener
     public void onConnected(SessionConnectedEvent event) {
-        register(event.getUser(), SimpMessageHeaderAccessor.getSessionId(event.getMessage().getHeaders()), true);
+        chatPresenceConnectionManager.connected(
+                userId(event.getUser()),
+                SimpMessageHeaderAccessor.getSessionId(event.getMessage().getHeaders())
+        );
     }
 
     @EventListener
     public void onDisconnected(SessionDisconnectEvent event) {
-        register(event.getUser(), event.getSessionId(), false);
+        chatPresenceConnectionManager.disconnected(event.getSessionId());
     }
 
-    private void register(Principal principal, String sessionId, boolean connected) {
-        if (principal == null || sessionId == null) {
-            return;
+    private Long userId(Principal principal) {
+        if (principal == null) {
+            return null;
         }
         try {
-            Long userId = Long.parseLong(principal.getName());
-            if (connected) {
-                if (chatPresenceRegistry.connected(userId, sessionId)) {
-                    chatPresenceNotificationService.publishStatusChange(userId, true);
-                }
-            } else if (chatPresenceRegistry.disconnected(userId, sessionId)) {
-                chatPresenceNotificationService.publishStatusChange(userId, false);
-            }
+            return Long.parseLong(principal.getName());
         } catch (NumberFormatException ignored) {
+            return null;
         }
     }
 }
