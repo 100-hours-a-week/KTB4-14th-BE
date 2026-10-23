@@ -18,6 +18,10 @@ spring:
     redis:
       host: ${AUDIGO_REDIS_HOST:localhost}
       port: ${AUDIGO_REDIS_PORT:6379}
+      username: ${AUDIGO_REDIS_USERNAME:}
+      password: ${AUDIGO_REDIS_PASSWORD:}
+      ssl:
+        enabled: ${AUDIGO_REDIS_SSL_ENABLED:false}
       connect-timeout: ${AUDIGO_REDIS_CONNECT_TIMEOUT:2s}
       timeout: ${AUDIGO_REDIS_TIMEOUT:2s}
 
