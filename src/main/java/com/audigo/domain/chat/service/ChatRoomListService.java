@@ -23,16 +23,16 @@ public class ChatRoomListService {
 
     private final ChatRoomListRepository chatRoomListRepository;
     private final ChatMessageListRepository chatMessageListRepository;
-    private final ChatPresenceRegistry chatPresenceRegistry;
+    private final ChatPresenceQueryService chatPresenceQueryService;
 
     public ChatRoomListService(
             ChatRoomListRepository chatRoomListRepository,
             ChatMessageListRepository chatMessageListRepository,
-            ChatPresenceRegistry chatPresenceRegistry
+            ChatPresenceQueryService chatPresenceQueryService
     ) {
         this.chatRoomListRepository = chatRoomListRepository;
         this.chatMessageListRepository = chatMessageListRepository;
-        this.chatPresenceRegistry = chatPresenceRegistry;
+        this.chatPresenceQueryService = chatPresenceQueryService;
     }
 
     @Transactional(readOnly = true)
@@ -60,15 +60,20 @@ public class ChatRoomListService {
         List<Long> roomIds = pageRows.stream()
                 .map(ChatRoomListRow::roomId)
                 .toList();
+        List<Long> opponentUserIds = pageRows.stream()
+                .map(ChatRoomListRow::otherUserId)
+                .distinct()
+                .toList();
         Map<Long, String> latestMessages = chatMessageListRepository.findLatestMessages(roomIds);
         Map<Long, Long> unreadCounts = chatMessageListRepository.countUnreadMessages(roomIds, userId);
+        Map<Long, Boolean> onlineStatuses = chatPresenceQueryService.findOnlineStatuses(opponentUserIds);
 
         List<ChatRoomItemResponse> rooms = pageRows.stream()
                 .map(row -> new ChatRoomItemResponse(
                         row.roomId(),
                         row.chatName(),
                         row.status(),
-                        chatPresenceRegistry.isOnline(row.otherUserId()),
+                        onlineStatuses.get(row.otherUserId()),
                         latestMessages.getOrDefault(row.roomId(), ""),
                         row.lastMessageAt(),
                         row.profileImageUrl(),
