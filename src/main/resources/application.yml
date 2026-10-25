@@ -53,6 +53,10 @@ audigo:
       renewal-interval: ${AUDIGO_CHAT_PRESENCE_RENEWAL_INTERVAL:15s}
       lease-duration: ${AUDIGO_CHAT_PRESENCE_LEASE_DURATION:45s}
       key-ttl: ${AUDIGO_CHAT_PRESENCE_KEY_TTL:90s}
+    realtime:
+      application-name: ${spring.application.name:audigo-be}
+      environment: ${AUDIGO_ENVIRONMENT:${SPRING_PROFILES_ACTIVE:local}}
+      channel: ${AUDIGO_CHAT_REALTIME_CHANNEL:}
   auth:
     access-token-ttl-seconds: ${AUDIGO_ACCESS_TOKEN_TTL_SECONDS:3600}
     refresh-token-ttl-seconds: ${AUDIGO_REFRESH_TOKEN_TTL_SECONDS:1209600}

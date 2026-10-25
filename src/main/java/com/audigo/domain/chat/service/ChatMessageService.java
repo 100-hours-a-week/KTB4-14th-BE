@@ -13,6 +13,7 @@ import com.audigo.domain.chat.entity.ChatRoomStatus;
 import com.audigo.domain.chat.repository.ChatMessageRepository;
 import com.audigo.domain.chat.repository.ChatRoomMemberRepository;
 import com.audigo.domain.chat.repository.ChatRoomRepository;
+import com.audigo.domain.chat.realtime.ChatRealtimePublisher;
 import com.audigo.domain.notification.service.NotificationService;
 import com.audigo.domain.user.entity.User;
 import com.audigo.domain.user.repository.UserRepository;
@@ -28,7 +29,6 @@ import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
@@ -41,13 +41,12 @@ public class ChatMessageService {
     private static final Logger log = LoggerFactory.getLogger(ChatMessageService.class);
     private static final int MAX_MESSAGES_PER_WINDOW = 10;
     private static final Duration RATE_LIMIT_WINDOW = Duration.ofSeconds(60);
-    private static final String RECIPIENT_DESTINATION = "/queue/chat/messages";
 
     private final ChatRoomRepository chatRoomRepository;
     private final ChatRoomMemberRepository chatRoomMemberRepository;
     private final ChatMessageRepository chatMessageRepository;
     private final UserRepository userRepository;
-    private final SimpMessagingTemplate messagingTemplate;
+    private final ChatRealtimePublisher realtimePublisher;
     private final NotificationService notificationService;
 
     public ChatMessageService(
@@ -55,14 +54,14 @@ public class ChatMessageService {
             ChatRoomMemberRepository chatRoomMemberRepository,
             ChatMessageRepository chatMessageRepository,
             UserRepository userRepository,
-            SimpMessagingTemplate messagingTemplate,
+            ChatRealtimePublisher realtimePublisher,
             NotificationService notificationService
     ) {
         this.chatRoomRepository = chatRoomRepository;
         this.chatRoomMemberRepository = chatRoomMemberRepository;
         this.chatMessageRepository = chatMessageRepository;
         this.userRepository = userRepository;
-        this.messagingTemplate = messagingTemplate;
+        this.realtimePublisher = realtimePublisher;
         this.notificationService = notificationService;
     }
 
@@ -201,11 +200,7 @@ public class ChatMessageService {
             ChatMessageRealtimeEvent event
     ) {
         try {
-            messagingTemplate.convertAndSendToUser(
-                    recipientUserId.toString(),
-                    RECIPIENT_DESTINATION,
-                    event
-            );
+            realtimePublisher.publish(recipientUserId, event);
         } catch (RuntimeException exception) {
             log.warn(
                     "chat_message_realtime_publish_failed room_id={} message_id={} recipient_id={}",

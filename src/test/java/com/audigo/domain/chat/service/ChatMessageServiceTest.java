@@ -21,6 +21,7 @@ import com.audigo.domain.chat.repository.ChatMessageRepository;
 import com.audigo.domain.chat.repository.ChatRoomDetailRepository;
 import com.audigo.domain.chat.repository.ChatRoomMemberRepository;
 import com.audigo.domain.chat.repository.ChatRoomRepository;
+import com.audigo.domain.chat.realtime.ChatRealtimePublisher;
 import com.audigo.domain.notification.service.NotificationService;
 import com.audigo.domain.user.entity.User;
 import com.audigo.domain.user.repository.UserRepository;
@@ -38,7 +39,6 @@ import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
@@ -66,7 +66,7 @@ class ChatMessageServiceTest {
     private UserRepository userRepository;
 
     @Mock
-    private SimpMessagingTemplate messagingTemplate;
+    private ChatRealtimePublisher realtimePublisher;
 
     @Mock
     private NotificationService notificationService;
@@ -125,10 +125,10 @@ class ChatMessageServiceTest {
 
         List<TransactionSynchronization> synchronizations = TransactionSynchronizationManager.getSynchronizations();
         assertThat(synchronizations).hasSize(1);
+        verify(realtimePublisher, never()).publish(eq(RECIPIENT_ID), any(ChatMessageRealtimeEvent.class));
         synchronizations.forEach(TransactionSynchronization::afterCommit);
-        verify(messagingTemplate).convertAndSendToUser(
-                eq(RECIPIENT_ID.toString()),
-                eq("/queue/chat/messages"),
+        verify(realtimePublisher).publish(
+                eq(RECIPIENT_ID),
                 any(ChatMessageRealtimeEvent.class)
         );
         verify(notificationService).notifyNewMessage(
@@ -181,6 +181,7 @@ class ChatMessageServiceTest {
                 CLIENT_MESSAGE_ID
         );
         verify(chatMessageRepository, never()).saveAndFlush(any(ChatMessage.class));
+        verify(realtimePublisher, never()).publish(eq(RECIPIENT_ID), any(ChatMessageRealtimeEvent.class));
     }
 
     @Test
@@ -217,6 +218,7 @@ class ChatMessageServiceTest {
                 any(LocalDateTime.class)
         );
         verify(chatMessageRepository, never()).saveAndFlush(any(ChatMessage.class));
+        verify(realtimePublisher, never()).publish(eq(RECIPIENT_ID), any(ChatMessageRealtimeEvent.class));
     }
 
     @Test
