@@ -170,12 +170,23 @@ class RedisChatPresenceStoreTest {
     }
 
     @Test
-    void batchLookupPropagatesRedisFailuresInsteadOfReportingOffline() {
-        doThrow(new RedisConnectionFailureException("Redis unavailable"))
+    void batchLookupReportsTheFailedItemAndDoesNotReportOffline() {
+        RedisConnectionFailureException cause = new RedisConnectionFailureException("Redis unavailable");
+        doReturn(1L).doThrow(cause)
                 .when(redisTemplate).execute(any(RedisScript.class), anyList(), any(Object[].class));
 
-        assertThatThrownBy(() -> store.findOnlineStatuses(List.of(7L)))
-                .isInstanceOf(RedisConnectionFailureException.class);
+        assertThatThrownBy(() -> store.findOnlineStatuses(List.of(7L, 8L, 9L)))
+                .isInstanceOfSatisfying(ChatPresenceRedisLookupException.class, exception -> {
+                    assertThat(exception.queryIndex()).isEqualTo(2);
+                    assertThat(exception.queryTotal()).isEqualTo(3);
+                    assertThat(exception.elapsedMillis()).isGreaterThanOrEqualTo(0);
+                    assertThat(exception.getCause()).isSameAs(cause);
+                });
+
+        assertThat(captureInvocations(2)).extracting(Invocation::keys).containsExactly(
+                List.of("chat:presence:user:7"),
+                List.of("chat:presence:user:8")
+        );
     }
 
     @Test

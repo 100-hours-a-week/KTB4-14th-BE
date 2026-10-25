@@ -14,6 +14,7 @@ import java.util.Set;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.data.redis.core.script.RedisScript;
+import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -139,7 +140,18 @@ public class RedisChatPresenceStore {
 
         Map<Long, Boolean> result = new LinkedHashMap<>();
         for (int index = 0; index < orderedUserIds.size(); index++) {
-            long status = executeRequired(ONLINE_STATUS_SCRIPT, List.of(keys.get(index)));
+            long startedAt = System.nanoTime();
+            long status;
+            try {
+                status = executeRequired(ONLINE_STATUS_SCRIPT, List.of(keys.get(index)));
+            } catch (DataAccessException exception) {
+                throw new ChatPresenceRedisLookupException(
+                        index + 1,
+                        orderedUserIds.size(),
+                        elapsedMillis(startedAt),
+                        exception
+                );
+            }
             if (status != 0L && status != 1L) {
                 throw new IllegalStateException("Redis chat presence query returned an invalid status");
             }
@@ -177,6 +189,10 @@ public class RedisChatPresenceStore {
             throw new IllegalStateException("Chat presence durations must be at least one millisecond");
         }
         return Long.toString(value);
+    }
+
+    private static long elapsedMillis(long startedAt) {
+        return (System.nanoTime() - startedAt) / 1_000_000;
     }
 
     private static RedisScript<Long> script(String source) {
