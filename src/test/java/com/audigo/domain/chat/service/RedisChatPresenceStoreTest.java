@@ -6,11 +6,13 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.audigo.domain.chat.config.ChatPresenceProperties;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -121,7 +123,7 @@ class RedisChatPresenceStoreTest {
 
     @Test
     void isOnlineUsesRedisTimeAndRemovesExpiredMembersAndEmptyKeys() {
-        doReturn("1").when(redisTemplate).execute(any(RedisScript.class), anyList(), any(Object[].class));
+        doReturn(1L).when(redisTemplate).execute(any(RedisScript.class), anyList(), any(Object[].class));
 
         assertThat(store.isOnline(7L)).isTrue();
 
@@ -133,12 +135,14 @@ class RedisChatPresenceStoreTest {
                 .contains("ZREMRANGEBYSCORE")
                 .contains("ZCARD")
                 .contains("DEL")
-                .contains("table.concat");
+                .contains("KEYS[1]")
+                .doesNotContain("ipairs(KEYS)");
     }
 
     @Test
     void batchLookupDeduplicatesUserIdsAndReturnsStatusesInInputOrder() {
-        doReturn("101").when(redisTemplate).execute(any(RedisScript.class), anyList(), any(Object[].class));
+        doReturn(1L, 0L, 1L).when(redisTemplate)
+                .execute(any(RedisScript.class), anyList(), any(Object[].class));
 
         assertThat(store.findOnlineStatuses(List.of(7L, 8L, 9L, 7L)))
                 .containsExactly(
@@ -147,13 +151,15 @@ class RedisChatPresenceStoreTest {
                         java.util.Map.entry(9L, true)
                 );
 
-        Invocation invocation = captureInvocation();
-        assertThat(invocation.keys()).containsExactly(
-                "chat:presence:user:7",
-                "chat:presence:user:8",
-                "chat:presence:user:9"
+        List<Invocation> invocations = captureInvocations(3);
+        assertThat(invocations).extracting(Invocation::keys).containsExactly(
+                List.of("chat:presence:user:7"),
+                List.of("chat:presence:user:8"),
+                List.of("chat:presence:user:9")
         );
-        assertThat(invocation.script()).contains("for index, key in ipairs(KEYS) do");
+        assertThat(invocations).allSatisfy(invocation -> assertThat(invocation.script())
+                .contains("KEYS[1]")
+                .doesNotContain("ipairs(KEYS)"));
     }
 
     @Test
@@ -164,17 +170,28 @@ class RedisChatPresenceStoreTest {
     }
 
     @Test
-    void batchLookupPropagatesRedisFailuresInsteadOfReportingOffline() {
-        doThrow(new RedisConnectionFailureException("Redis unavailable"))
+    void batchLookupReportsTheFailedItemAndDoesNotReportOffline() {
+        RedisConnectionFailureException cause = new RedisConnectionFailureException("Redis unavailable");
+        doReturn(1L).doThrow(cause)
                 .when(redisTemplate).execute(any(RedisScript.class), anyList(), any(Object[].class));
 
-        assertThatThrownBy(() -> store.findOnlineStatuses(List.of(7L)))
-                .isInstanceOf(RedisConnectionFailureException.class);
+        assertThatThrownBy(() -> store.findOnlineStatuses(List.of(7L, 8L, 9L)))
+                .isInstanceOfSatisfying(ChatPresenceRedisLookupException.class, exception -> {
+                    assertThat(exception.queryIndex()).isEqualTo(2);
+                    assertThat(exception.queryTotal()).isEqualTo(3);
+                    assertThat(exception.elapsedMillis()).isGreaterThanOrEqualTo(0);
+                    assertThat(exception.getCause()).isSameAs(cause);
+                });
+
+        assertThat(captureInvocations(2)).extracting(Invocation::keys).containsExactly(
+                List.of("chat:presence:user:7"),
+                List.of("chat:presence:user:8")
+        );
     }
 
     @Test
     void batchLookupRejectsMalformedRedisResults() {
-        doReturn("2").when(redisTemplate).execute(any(RedisScript.class), anyList(), any(Object[].class));
+        doReturn(2L).when(redisTemplate).execute(any(RedisScript.class), anyList(), any(Object[].class));
 
         assertThatThrownBy(() -> store.findOnlineStatuses(List.of(7L)))
                 .isInstanceOf(IllegalStateException.class);
@@ -190,15 +207,25 @@ class RedisChatPresenceStoreTest {
 
     @SuppressWarnings({"unchecked", "rawtypes"})
     private Invocation captureInvocation() {
+        return captureInvocations(1).getFirst();
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private List<Invocation> captureInvocations(int count) {
         ArgumentCaptor<RedisScript<?>> scriptCaptor = ArgumentCaptor.forClass((Class) RedisScript.class);
         ArgumentCaptor<List<String>> keysCaptor = ArgumentCaptor.forClass((Class) List.class);
         ArgumentCaptor<Object[]> argumentsCaptor = ArgumentCaptor.forClass(Object[].class);
-        verify(redisTemplate).execute(scriptCaptor.capture(), keysCaptor.capture(), argumentsCaptor.capture());
-        return new Invocation(
-                scriptCaptor.getValue().getScriptAsString(),
-                keysCaptor.getValue(),
-                java.util.Arrays.stream(argumentsCaptor.getValue()).map(String::valueOf).toList()
-        );
+        verify(redisTemplate, times(count))
+                .execute(scriptCaptor.capture(), keysCaptor.capture(), argumentsCaptor.capture());
+        List<Invocation> invocations = new ArrayList<>();
+        for (int index = 0; index < count; index++) {
+            invocations.add(new Invocation(
+                    scriptCaptor.getAllValues().get(index).getScriptAsString(),
+                    keysCaptor.getAllValues().get(index),
+                    java.util.Arrays.stream(argumentsCaptor.getAllValues().get(index)).map(String::valueOf).toList()
+            ));
+        }
+        return invocations;
     }
 
     private record Invocation(String script, List<String> keys, List<String> arguments) {

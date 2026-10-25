@@ -22,8 +22,11 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.MDC;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
-@ExtendWith(MockitoExtension.class)
+@ExtendWith({MockitoExtension.class, OutputCaptureExtension.class})
 class ChatRoomListServiceTest {
 
     @Mock
@@ -86,5 +89,38 @@ class ChatRoomListServiceTest {
         assertThat(response.rooms().get(1).isOnline()).isFalse();
         assertThat(response.rooms().get(2).isOnline()).isTrue();
         verify(chatPresenceQueryService).findOnlineStatuses(List.of(2L, 3L));
+    }
+
+    @Test
+    void logs_the_presence_stage_and_request_context_when_lookup_fails(CapturedOutput output) {
+        LocalDateTime lastMessageAt = LocalDateTime.of(2026, 10, 1, 9, 0);
+        when(chatRoomListRepository.findPage(7L, null, null, null, 21)).thenReturn(List.of(
+                new ChatRoomListRow(54L, 2L, "민지", ChatRoomStatus.ACTIVE, lastMessageAt, null),
+                new ChatRoomListRow(55L, 2L, "민지", ChatRoomStatus.ACTIVE, lastMessageAt, null)
+        ));
+        when(chatMessageListRepository.findLatestMessages(List.of(54L, 55L)))
+                .thenReturn(Map.of(54L, "안녕하세요", 55L, "다시 만나요"));
+        when(chatMessageListRepository.countUnreadMessages(List.of(54L, 55L), 7L))
+                .thenReturn(Map.of(54L, 1L, 55L, 2L));
+        when(chatPresenceQueryService.findOnlineStatuses(List.of(2L)))
+                .thenThrow(new BusinessException(ErrorCode.SERVICE_UNAVAILABLE));
+        MDC.put("request_id", "request-456");
+
+        try {
+            assertThatThrownBy(() -> chatRoomListService.list(
+                    7L,
+                    new ChatRoomListQuery(null, null, null, null)
+            )).isInstanceOf(BusinessException.class);
+        } finally {
+            MDC.remove("request_id");
+        }
+
+        assertThat(output.getAll())
+                .contains("chat_room_list_stage_failed")
+                .contains("request_id=request-456")
+                .contains("stage=presence_lookup")
+                .contains("page_size=20")
+                .contains("room_count=2")
+                .contains("unique_user_count=1");
     }
 }
