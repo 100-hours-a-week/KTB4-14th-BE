@@ -10,6 +10,7 @@ import com.audigo.domain.chat.repository.ChatMessageReadRepository;
 import com.audigo.domain.chat.repository.ChatMessageRepository;
 import com.audigo.domain.chat.repository.ChatRoomMemberRepository;
 import com.audigo.domain.chat.repository.ChatRoomRepository;
+import com.audigo.domain.chat.realtime.ChatRealtimePublisher;
 import com.audigo.global.error.BusinessException;
 import com.audigo.global.error.ErrorCode;
 import java.time.LocalDateTime;
@@ -18,7 +19,6 @@ import java.time.ZoneOffset;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -28,26 +28,25 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 public class ChatMessageReadService {
 
     private static final Logger log = LoggerFactory.getLogger(ChatMessageReadService.class);
-    private static final String RECIPIENT_DESTINATION = "/queue/chat/messages";
 
     private final ChatRoomRepository chatRoomRepository;
     private final ChatRoomMemberRepository chatRoomMemberRepository;
     private final ChatMessageRepository chatMessageRepository;
     private final ChatMessageReadRepository chatMessageReadRepository;
-    private final SimpMessagingTemplate messagingTemplate;
+    private final ChatRealtimePublisher realtimePublisher;
 
     public ChatMessageReadService(
             ChatRoomRepository chatRoomRepository,
             ChatRoomMemberRepository chatRoomMemberRepository,
             ChatMessageRepository chatMessageRepository,
             ChatMessageReadRepository chatMessageReadRepository,
-            SimpMessagingTemplate messagingTemplate
+            ChatRealtimePublisher realtimePublisher
     ) {
         this.chatRoomRepository = chatRoomRepository;
         this.chatRoomMemberRepository = chatRoomMemberRepository;
         this.chatMessageRepository = chatMessageRepository;
         this.chatMessageReadRepository = chatMessageReadRepository;
-        this.messagingTemplate = messagingTemplate;
+        this.realtimePublisher = realtimePublisher;
     }
 
     @Transactional
@@ -117,11 +116,7 @@ public class ChatMessageReadService {
             @Override
             public void afterCommit() {
                 try {
-                    messagingTemplate.convertAndSendToUser(
-                            recipientUserId.toString(),
-                            RECIPIENT_DESTINATION,
-                            event
-                    );
+                    realtimePublisher.publish(recipientUserId, event);
                 } catch (RuntimeException exception) {
                     log.warn(
                             "chat_read_receipt_realtime_publish_failed room_id={} reader_id={} recipient_id={}",

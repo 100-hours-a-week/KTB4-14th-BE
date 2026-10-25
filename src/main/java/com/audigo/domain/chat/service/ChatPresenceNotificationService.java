@@ -1,30 +1,28 @@
 package com.audigo.domain.chat.service;
 
 import com.audigo.domain.chat.dto.ChatPresenceRealtimeEvent;
+import com.audigo.domain.chat.realtime.ChatRealtimePublisher;
 import com.audigo.domain.matching.entity.MatchConnectionStatus;
 import com.audigo.domain.matching.repository.MatchConnectionRepository;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
 @Service
 public class ChatPresenceNotificationService {
 
     private static final Logger log = LoggerFactory.getLogger(ChatPresenceNotificationService.class);
-    private static final String RECIPIENT_DESTINATION = "/queue/chat/messages";
-
     private final MatchConnectionRepository matchConnectionRepository;
-    private final SimpMessagingTemplate messagingTemplate;
+    private final ChatRealtimePublisher realtimePublisher;
 
     public ChatPresenceNotificationService(
             MatchConnectionRepository matchConnectionRepository,
-            SimpMessagingTemplate messagingTemplate
+            ChatRealtimePublisher realtimePublisher
     ) {
         this.matchConnectionRepository = matchConnectionRepository;
-        this.messagingTemplate = messagingTemplate;
+        this.realtimePublisher = realtimePublisher;
     }
 
     public void publishStatusChange(Long userId, boolean online) {
@@ -48,11 +46,7 @@ public class ChatPresenceNotificationService {
 
         for (Long recipientUserId : counterpartUserIds) {
             try {
-                messagingTemplate.convertAndSendToUser(
-                        recipientUserId.toString(),
-                        RECIPIENT_DESTINATION,
-                        event
-                );
+                realtimePublisher.publish(recipientUserId, event);
             } catch (RuntimeException exception) {
                 log.warn(
                         "chat_presence_realtime_publish_failed user_id={} recipient_id={} is_online={}",
