@@ -9,13 +9,20 @@ import com.audigo.domain.chat.repository.ChatRoomListRow;
 import com.audigo.global.error.BusinessException;
 import com.audigo.global.error.ErrorCode;
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class ChatRoomListService {
+
+    private static final Logger log = LoggerFactory.getLogger(ChatRoomListService.class);
 
     private static final int DEFAULT_SIZE = 20;
     private static final int MIN_CHAT_NAME_LENGTH = 2;
@@ -41,12 +48,18 @@ public class ChatRoomListService {
         int pageSize = query.size() == null ? DEFAULT_SIZE : query.size();
         LocalDateTime cursorTime = query.cursorTime();
 
-        List<ChatRoomListRow> fetchedRows = chatRoomListRepository.findPage(
-                userId,
-                chatName,
-                cursorTime,
-                query.cursorId(),
-                pageSize + 1
+        List<ChatRoomListRow> fetchedRows = executeStage(
+                "room_page_query",
+                pageSize,
+                null,
+                null,
+                () -> chatRoomListRepository.findPage(
+                        userId,
+                        chatName,
+                        cursorTime,
+                        query.cursorId(),
+                        pageSize + 1
+                )
         );
         boolean hasNext = fetchedRows.size() > pageSize;
         List<ChatRoomListRow> pageRows = hasNext
@@ -64,9 +77,27 @@ public class ChatRoomListService {
                 .map(ChatRoomListRow::otherUserId)
                 .distinct()
                 .toList();
-        Map<Long, String> latestMessages = chatMessageListRepository.findLatestMessages(roomIds);
-        Map<Long, Long> unreadCounts = chatMessageListRepository.countUnreadMessages(roomIds, userId);
-        Map<Long, Boolean> onlineStatuses = chatPresenceQueryService.findOnlineStatuses(opponentUserIds);
+        Map<Long, String> latestMessages = executeStage(
+                "latest_messages",
+                pageSize,
+                pageRows.size(),
+                opponentUserIds.size(),
+                () -> chatMessageListRepository.findLatestMessages(roomIds)
+        );
+        Map<Long, Long> unreadCounts = executeStage(
+                "unread_counts",
+                pageSize,
+                pageRows.size(),
+                opponentUserIds.size(),
+                () -> chatMessageListRepository.countUnreadMessages(roomIds, userId)
+        );
+        Map<Long, Boolean> onlineStatuses = executeStage(
+                "presence_lookup",
+                pageSize,
+                pageRows.size(),
+                opponentUserIds.size(),
+                () -> chatPresenceQueryService.findOnlineStatuses(opponentUserIds)
+        );
 
         List<ChatRoomItemResponse> rooms = pageRows.stream()
                 .map(row -> new ChatRoomItemResponse(
@@ -101,5 +132,65 @@ public class ChatRoomListService {
             throw new BusinessException(ErrorCode.INVALID_REQUEST);
         }
         return normalized;
+    }
+
+    private <T> T executeStage(
+            String stage,
+            int pageSize,
+            Integer roomCount,
+            Integer uniqueUserCount,
+            Supplier<T> action
+    ) {
+        long startedAt = System.nanoTime();
+        try {
+            T result = action.get();
+            int measuredRoomCount = roomCount == null && result instanceof Collection<?> rows
+                    ? rows.size()
+                    : roomCount == null ? -1 : roomCount;
+            log.debug(
+                    "chat_room_list_stage_completed request_id={} stage={} page_size={} room_count={} "
+                            + "unique_user_count={} duration_ms={}",
+                    MDC.get("request_id"),
+                    stage,
+                    pageSize,
+                    countValue(measuredRoomCount),
+                    countValue(uniqueUserCount),
+                    elapsedMillis(startedAt)
+            );
+            return result;
+        } catch (RuntimeException exception) {
+            String message = "chat_room_list_stage_failed request_id={} stage={} page_size={} room_count={} "
+                    + "unique_user_count={} duration_ms={} exception_class={}";
+            Object[] fields = {
+                    MDC.get("request_id"),
+                    stage,
+                    pageSize,
+                    countValue(roomCount),
+                    countValue(uniqueUserCount),
+                    elapsedMillis(startedAt),
+                    exception.getClass().getSimpleName()
+            };
+            if ("presence_lookup".equals(stage)) {
+                log.error(message, fields);
+            } else {
+                log.error(message, append(fields, exception));
+            }
+            throw exception;
+        }
+    }
+
+    private static Object[] append(Object[] values, Object value) {
+        Object[] result = new Object[values.length + 1];
+        System.arraycopy(values, 0, result, 0, values.length);
+        result[values.length] = value;
+        return result;
+    }
+
+    private static String countValue(Integer count) {
+        return count == null ? "unknown" : count.toString();
+    }
+
+    private static long elapsedMillis(long startedAt) {
+        return (System.nanoTime() - startedAt) / 1_000_000;
     }
 }
