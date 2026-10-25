@@ -67,23 +67,16 @@ public class RedisChatPresenceStore {
             return removed
             """);
 
-    private static final RedisScript<String> ONLINE_STATUSES_SCRIPT = new DefaultRedisScript<>("""
+    private static final RedisScript<Long> ONLINE_STATUS_SCRIPT = script("""
             local redisTime = redis.call('TIME')
             local nowMillis = redisTime[1] * 1000 + math.floor(redisTime[2] / 1000)
-            local statuses = {}
-
-            for index, key in ipairs(KEYS) do
-                redis.call('ZREMRANGEBYSCORE', key, '-inf', nowMillis)
-                if redis.call('ZCARD', key) == 0 then
-                    redis.call('DEL', key)
-                    statuses[index] = '0'
-                else
-                    statuses[index] = '1'
-                end
+            redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', nowMillis)
+            if redis.call('ZCARD', KEYS[1]) == 0 then
+                redis.call('DEL', KEYS[1])
+                return 0
             end
-
-            return table.concat(statuses, '')
-            """, String.class);
+            return 1
+            """);
 
     private final StringRedisTemplate redisTemplate;
     private final ChatPresenceProperties properties;
@@ -143,18 +136,14 @@ public class RedisChatPresenceStore {
         List<String> keys = orderedUserIds.stream()
                 .map(RedisChatPresenceStore::key)
                 .toList();
-        String statuses = executeRequired(ONLINE_STATUSES_SCRIPT, keys);
-        if (statuses.length() != orderedUserIds.size()) {
-            throw new IllegalStateException("Redis chat presence query returned an invalid result size");
-        }
 
         Map<Long, Boolean> result = new LinkedHashMap<>();
         for (int index = 0; index < orderedUserIds.size(); index++) {
-            char status = statuses.charAt(index);
-            if (status != '0' && status != '1') {
+            long status = executeRequired(ONLINE_STATUS_SCRIPT, List.of(keys.get(index)));
+            if (status != 0L && status != 1L) {
                 throw new IllegalStateException("Redis chat presence query returned an invalid status");
             }
-            result.put(orderedUserIds.get(index), status == '1');
+            result.put(orderedUserIds.get(index), status == 1L);
         }
         return Collections.unmodifiableMap(result);
     }
