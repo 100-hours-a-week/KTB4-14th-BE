@@ -151,7 +151,8 @@ public class TravelGenerationJobService {
         if (!TravelGenerationMessageVersion.V1.equals(message.messageVersion())) {
             throw new IllegalArgumentException("지원하지 않는 여행 생성 결과 메시지 버전입니다.");
         }
-        TravelGenerationJob job = getJobForUpdate(message.generationJobId());
+        TravelGenerationResultTiming timing = TravelGenerationResultTiming.of(message, null, null);
+        TravelGenerationJob job = timing.measure("job_lock", () -> getJobForUpdate(message.generationJobId()));
         if (job.getStatus() != TravelPlanStatus.GENERATING) {
             return;
         }
