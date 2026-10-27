@@ -30,7 +30,9 @@ public class TravelGenerationResultInboxService {
             String messageBody,
             int receiveCount
     ) {
-        if (inboxRepository.findByEventId(message.eventId()).isPresent()) {
+        TravelGenerationResultTiming timing = TravelGenerationResultTiming.of(message, sqsMessageId, receiveCount);
+        timing.observeCommit();
+        if (timing.measure("inbox_lookup", () -> inboxRepository.findByEventId(message.eventId())).isPresent()) {
             return ProcessingResult.DUPLICATE;
         }
 
@@ -40,8 +42,11 @@ public class TravelGenerationResultInboxService {
                 messageBody,
                 receiveCount
         );
-        inboxRepository.saveAndFlush(inbox);
-        jobService.handleResultMessage(message);
+        timing.measure("inbox_insert", () -> inboxRepository.saveAndFlush(inbox));
+        timing.measure("result_apply", () -> {
+            jobService.handleResultMessage(message);
+            return null;
+        });
         inbox.markProcessed();
         return ProcessingResult.PROCESSED;
     }
