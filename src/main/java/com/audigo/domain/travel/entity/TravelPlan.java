@@ -7,7 +7,10 @@ import java.util.Collections;
 import java.util.List;
 
 @Entity
-@Table(name = "travel_plans")
+@Table(
+        name = "travel_plans",
+        indexes = @Index(name = "idx_travel_plans_user_id", columnList = "user_id")
+)
 
 public class TravelPlan {
 
