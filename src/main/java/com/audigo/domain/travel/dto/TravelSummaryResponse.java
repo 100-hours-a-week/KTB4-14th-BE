@@ -3,6 +3,7 @@ package com.audigo.domain.travel.dto;
 import com.audigo.domain.travel.entity.CompanionType;
 import com.audigo.domain.travel.entity.TravelPlan;
 import com.audigo.domain.travel.entity.TravelPlanStatus;
+import com.audigo.domain.travel.repository.TravelSummaryRow;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -35,6 +36,21 @@ public record TravelSummaryResponse(
                 travelPlan.getStatus(),
                 travelPlan.getConfirmedAt(),
                 companionLabel(travelPlan.getCompanionType(), travelPlan.getHeadCount()),
+                "#2A9D8F"
+        );
+    }
+
+    public static TravelSummaryResponse from(TravelSummaryRow row) {
+        String destination = row.regionFullName();
+        return new TravelSummaryResponse(
+                row.travelPlanId(),
+                destination + " 여행",
+                destination,
+                row.arrivalDatetime().toLocalDate(),
+                row.departureDatetime().toLocalDate(),
+                row.status(),
+                row.confirmedAt(),
+                companionLabel(row.companionType(), row.headCount()),
                 "#2A9D8F"
         );
     }
