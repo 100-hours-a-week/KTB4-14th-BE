@@ -86,7 +86,7 @@ public class TravelPlanService {
 
     @Transactional(readOnly = true)
     public List<TravelSummaryResponse> getMyTravels(Long userId) {
-        return travelPlanRepository.findAllByUserIdOrderByCreatedAtDesc(userId).stream()
+        return travelPlanRepository.findSummariesByUserId(userId).stream()
                 .map(TravelSummaryResponse::from)
                 .toList();
     }
