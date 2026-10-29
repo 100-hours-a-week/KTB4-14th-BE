@@ -6,6 +6,8 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 public interface TravelPlanRepository extends JpaRepository<TravelPlan, Long> {
 
@@ -41,7 +43,24 @@ public interface TravelPlanRepository extends JpaRepository<TravelPlan, Long> {
             LocalDateTime now
     );
 
-    List<TravelPlan> findAllByUserIdOrderByCreatedAtDesc(Long userId);
+    // 목록 응답에 필요한 컬럼만 조회해 TravelPlan의 preference(OneToOne 역방향) 개별 조회를 피한다.
+    @Query("""
+            select new com.audigo.domain.travel.repository.TravelSummaryRow(
+                travelPlan.id,
+                region.fullName,
+                travelPlan.arrivalDatetime,
+                travelPlan.departureDatetime,
+                travelPlan.status,
+                travelPlan.confirmedAt,
+                travelPlan.companionType,
+                travelPlan.headCount
+            )
+            from TravelPlan travelPlan
+            join travelPlan.region region
+            where travelPlan.userId = :userId
+            order by travelPlan.createdAt desc
+            """)
+    List<TravelSummaryRow> findSummariesByUserId(@Param("userId") Long userId);
 
     boolean existsByUserIdAndStatusAndConfirmedAtIsNotNullAndIdNotAndArrivalDatetimeLessThanEqualAndDepartureDatetimeGreaterThanEqual(
             Long userId,
