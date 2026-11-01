@@ -126,6 +126,7 @@ class ChatMessageServiceTest {
         List<TransactionSynchronization> synchronizations = TransactionSynchronizationManager.getSynchronizations();
         assertThat(synchronizations).hasSize(1);
         verify(realtimePublisher, never()).publish(eq(RECIPIENT_ID), any(ChatMessageRealtimeEvent.class));
+        verify(notificationService, never()).notifyNewMessage(any(), any(), any());
         synchronizations.forEach(TransactionSynchronization::afterCommit);
         verify(realtimePublisher).publish(
                 eq(RECIPIENT_ID),
@@ -212,6 +213,7 @@ class ChatMessageServiceTest {
 
         assertThat(response.messageSequence()).isEqualTo(4L);
         assertThat(response.content()).isEqualTo("hello");
+        verify(notificationService, never()).notifyNewMessage(any(), any(), any());
         verify(chatMessageRepository, never()).countSentBySenderSince(
                 eq(SENDER_ID),
                 eq(ChatMessageStatus.SENT),
