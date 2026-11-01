@@ -47,6 +47,11 @@ management:
         include: health
 
 audigo:
+  notification:
+    realtime:
+      application-name: ${spring.application.name:audigo-be}
+      environment: ${AUDIGO_ENVIRONMENT:${SPRING_PROFILES_ACTIVE:local}}
+      channel: ${AUDIGO_NOTIFICATION_REALTIME_CHANNEL:}
   cors:
     allowed-origins: ${AUDIGO_CORS_ALLOWED_ORIGINS:http://localhost:5173}
   chat:

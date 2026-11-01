@@ -13,6 +13,7 @@ import com.audigo.domain.notification.entity.Notification;
 import com.audigo.domain.notification.entity.NotificationSetting;
 import com.audigo.domain.notification.entity.NotificationTargetType;
 import com.audigo.domain.notification.entity.NotificationType;
+import com.audigo.domain.notification.realtime.NotificationRealtimePublisher;
 import com.audigo.domain.notification.repository.NotificationRepository;
 import com.audigo.domain.notification.repository.NotificationSettingRepository;
 import com.audigo.domain.user.entity.User;
@@ -38,17 +39,20 @@ public class NotificationService {
     private final NotificationSettingRepository notificationSettingRepository;
     private final UserRepository userRepository;
     private final NotificationSseService notificationSseService;
+    private final NotificationRealtimePublisher realtimePublisher;
 
     public NotificationService(
             NotificationRepository notificationRepository,
             NotificationSettingRepository notificationSettingRepository,
             UserRepository userRepository,
-            NotificationSseService notificationSseService
+            NotificationSseService notificationSseService,
+            NotificationRealtimePublisher realtimePublisher
     ) {
         this.notificationRepository = notificationRepository;
         this.notificationSettingRepository = notificationSettingRepository;
         this.userRepository = userRepository;
         this.notificationSseService = notificationSseService;
+        this.realtimePublisher = realtimePublisher;
     }
 
     @Transactional(readOnly = true)
@@ -225,10 +229,10 @@ public class NotificationService {
                         response.targetId()
                 );
                 try {
-                    notificationSseService.sendNotification(userId, response);
+                    realtimePublisher.publish(userId, response);
                 } catch (RuntimeException exception) {
                     // The notification is already committed and remains available through the list API.
-                    log.warn("notification_sse_publish_failed user_id={} notification_id={}",
+                    log.warn("notification_realtime_publish_failed user_id={} notification_id={}",
                             userId, response.notificationId(), exception);
                 }
             }
