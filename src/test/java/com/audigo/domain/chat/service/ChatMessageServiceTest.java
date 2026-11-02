@@ -142,7 +142,7 @@ class ChatMessageServiceTest {
     @Test
     void does_not_create_another_notification_when_the_room_already_has_unread_messages() {
         stubNewMessagePath(0);
-        when(chatMessageRepository.countUnreadMessages(ROOM_ID, RECIPIENT_ID, ChatMessageStatus.SENT))
+        when(chatMessageRepository.existsUnreadMessages(ROOM_ID, RECIPIENT_ID))
                 .thenReturn(1L);
         when(room.getId()).thenReturn(ROOM_ID);
         when(sender.id()).thenReturn(SENDER_ID);
