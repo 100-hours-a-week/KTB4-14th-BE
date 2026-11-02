@@ -12,6 +12,8 @@ import java.util.Optional;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.context.SecurityContext;
+import org.springframework.security.web.context.SecurityContextRepository;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -20,10 +22,16 @@ public class BearerTokenAuthenticationFilter extends OncePerRequestFilter {
 
     private final TokenService tokenService;
     private final AuthCookieManager authCookieManager;
+    private final SecurityContextRepository securityContextRepository;
 
-    public BearerTokenAuthenticationFilter(TokenService tokenService, AuthCookieManager authCookieManager) {
+    public BearerTokenAuthenticationFilter(
+            TokenService tokenService,
+            AuthCookieManager authCookieManager,
+            SecurityContextRepository securityContextRepository
+    ) {
         this.tokenService = tokenService;
         this.authCookieManager = authCookieManager;
+        this.securityContextRepository = securityContextRepository;
     }
 
     @Override
@@ -39,7 +47,10 @@ public class BearerTokenAuthenticationFilter extends OncePerRequestFilter {
                             null,
                             List.of(new SimpleGrantedAuthority("ROLE_USER"))
                     );
-            SecurityContextHolder.getContext().setAuthentication(authentication);
+            SecurityContext context = SecurityContextHolder.createEmptyContext();
+            context.setAuthentication(authentication);
+            SecurityContextHolder.setContext(context);
+            securityContextRepository.saveContext(context, request, response);
         });
         filterChain.doFilter(request, response);
     }
