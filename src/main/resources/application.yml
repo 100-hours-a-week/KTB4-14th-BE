@@ -48,6 +48,9 @@ management:
 
 audigo:
   notification:
+    sse:
+      timeout: ${AUDIGO_NOTIFICATION_SSE_TIMEOUT:30m}
+      heartbeat-interval: ${AUDIGO_NOTIFICATION_SSE_HEARTBEAT_INTERVAL:15s}
     realtime:
       application-name: ${spring.application.name:audigo-be}
       environment: ${AUDIGO_ENVIRONMENT:${SPRING_PROFILES_ACTIVE:local}}

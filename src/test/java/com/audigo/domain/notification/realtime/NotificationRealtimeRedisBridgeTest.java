@@ -41,6 +41,17 @@ class NotificationRealtimeRedisBridgeTest {
             .build();
     private final NotificationRealtimeProperties properties = new NotificationRealtimeProperties("audigo-be", "test", "");
 
+    @Test
+    void confirmed_subscription_requests_local_resync_without_a_redis_publication() {
+        NotificationSseService localSse = mock(NotificationSseService.class);
+        RedisNotificationRealtimeListener listener = new RedisNotificationRealtimeListener(objectMapper, localSse);
+
+        listener.onChannelSubscribed(properties.channel().getBytes(StandardCharsets.UTF_8), 1);
+
+        verify(localSse).requestRedisResync();
+        verifyNoMoreInteractions(localSse);
+    }
+
     @ParameterizedTest
     @EnumSource(NotificationType.class)
     void notification_types_reach_local_sse_on_both_servers_once(NotificationType type) throws Exception {

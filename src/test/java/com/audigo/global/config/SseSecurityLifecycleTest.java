@@ -13,14 +13,23 @@ import com.audigo.domain.auth.cookie.AuthCookieManager;
 import com.audigo.domain.auth.service.TokenService;
 import com.audigo.global.security.BearerTokenAuthenticationFilter;
 import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
@@ -31,17 +40,38 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @SpringBootTest(classes = SseSecurityLifecycleTest.TestApplication.class,
+        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = "spring.config.name=sse-security-test")
+@ExtendWith(OutputCaptureExtension.class)
 class SseSecurityLifecycleTest {
 
     @Autowired private WebApplicationContext context;
     @Autowired private TokenService tokenService;
     @Autowired private SseController controller;
+    @Value("${local.server.port}") private int port;
     private MockMvc mockMvc;
+
+    @Test
+    void actual_http_sse_timeout_does_not_log_access_denied_after_response_commit(CapturedOutput output) throws Exception {
+        try (HttpClient client = HttpClient.newHttpClient()) {
+            HttpRequest request = HttpRequest.newBuilder(URI.create(
+                            "http://localhost:" + port + "/api/notifications/subscribe?timeout=100"))
+                    .header("Authorization", "Bearer valid-token")
+                    .timeout(Duration.ofSeconds(10)).GET().build();
+
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+            assertThat(response.statusCode()).isEqualTo(200);
+            assertThat(response.body()).contains("event:connected");
+            assertThat(output.getAll()).doesNotContain("AuthorizationDeniedException",
+                    "Unable to handle the Spring Security Exception because the response is already committed");
+        }
+    }
 
     @BeforeEach
     void setUp() {
@@ -89,9 +119,9 @@ class SseSecurityLifecycleTest {
         private Long userId;
 
         @GetMapping(value = "/api/notifications/subscribe", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-        SseEmitter subscribe() throws IOException {
+        SseEmitter subscribe(@RequestParam(defaultValue = "30000") long timeout) throws IOException {
             userId = (Long) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-            emitter = new SseEmitter(30_000L);
+            emitter = new SseEmitter(timeout);
             emitter.send(SseEmitter.event().name("connected").data("ready"));
             return emitter;
         }

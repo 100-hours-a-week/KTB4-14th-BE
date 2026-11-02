@@ -4,14 +4,16 @@ import com.audigo.domain.notification.dto.NotificationResponse;
 import com.audigo.domain.notification.service.NotificationSseService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.connection.Message;
 import org.springframework.data.redis.connection.MessageListener;
+import org.springframework.data.redis.connection.SubscriptionListener;
 import org.springframework.stereotype.Component;
 
 @Component
-public class RedisNotificationRealtimeListener implements MessageListener {
+public class RedisNotificationRealtimeListener implements MessageListener, SubscriptionListener {
 
     private static final Logger log = LoggerFactory.getLogger(RedisNotificationRealtimeListener.class);
 
@@ -21,6 +23,13 @@ public class RedisNotificationRealtimeListener implements MessageListener {
     public RedisNotificationRealtimeListener(ObjectMapper objectMapper, NotificationSseService localSseService) {
         this.objectMapper = objectMapper;
         this.localSseService = localSseService;
+    }
+
+    @Override
+    public void onChannelSubscribed(byte[] channel, long count) {
+        log.info("notification_realtime_redis_subscription_ready channel={} subscriptions={}",
+                new String(channel, StandardCharsets.UTF_8), count);
+        localSseService.requestRedisResync();
     }
 
     @Override
