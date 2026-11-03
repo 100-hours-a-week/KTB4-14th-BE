@@ -24,23 +24,24 @@ public interface ChatMessageRepository extends JpaRepository<ChatMessage, Long> 
             ChatMessageStatus status
     );
 
-    @Query("""
-            select count(message.id)
-            from ChatMessage message
-            where message.chatRoom.id = :roomId
-              and message.status = :status
-              and message.sender.id <> :userId
-              and not exists (
-                  select messageRead.id
-                  from ChatMessageRead messageRead
-                  where messageRead.message = message
-                    and messageRead.user.id = :userId
-              )
-            """)
-    long countUnreadMessages(
+    @Query(value = """
+            select exists (
+                select 1
+                from chat_messages message
+                where message.chat_room_id = :roomId
+                  and message.status = 'SENT'
+                  and message.sender_id <> :userId
+                  and not exists (
+                      select 1
+                      from chat_message_reads message_read
+                      where message_read.message_id = message.id
+                        and message_read.user_id = :userId
+                  )
+            )
+            """, nativeQuery = true)
+    long existsUnreadMessages(
             @Param("roomId") Long roomId,
-            @Param("userId") Long userId,
-            @Param("status") ChatMessageStatus status
+            @Param("userId") Long userId
     );
 
     @Query("""

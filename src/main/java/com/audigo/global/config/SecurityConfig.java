@@ -12,6 +12,8 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.expression.WebExpressionAuthorizationManager;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.context.RequestAttributeSecurityContextRepository;
+import org.springframework.security.web.context.SecurityContextRepository;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -23,12 +25,14 @@ public class SecurityConfig {
     SecurityFilterChain securityFilterChain(
             HttpSecurity http,
             BearerTokenAuthenticationFilter bearerTokenAuthenticationFilter,
+            SecurityContextRepository securityContextRepository,
             CorsProperties corsProperties
     ) throws Exception {
         return http
                 .cors(cors -> cors.configurationSource(corsConfigurationSource(corsProperties)))
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .securityContext(context -> context.securityContextRepository(securityContextRepository))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/actuator/health", "/health", "/users/login", "/users/refresh").permitAll()
@@ -39,6 +43,12 @@ public class SecurityConfig {
                 .addFilterBefore(bearerTokenAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterAfter(new RequestLoggingFilter(), BearerTokenAuthenticationFilter.class)
                 .build();
+    }
+
+    @Bean
+    SecurityContextRepository securityContextRepository() {
+        // Preserve authentication for ASYNC/ERROR dispatches of this request, without an HTTP session.
+        return new RequestAttributeSecurityContextRepository();
     }
 
     @Bean

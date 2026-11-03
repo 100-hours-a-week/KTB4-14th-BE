@@ -126,6 +126,7 @@ class ChatMessageServiceTest {
         List<TransactionSynchronization> synchronizations = TransactionSynchronizationManager.getSynchronizations();
         assertThat(synchronizations).hasSize(1);
         verify(realtimePublisher, never()).publish(eq(RECIPIENT_ID), any(ChatMessageRealtimeEvent.class));
+        verify(notificationService, never()).notifyNewMessage(any(), any(), any());
         synchronizations.forEach(TransactionSynchronization::afterCommit);
         verify(realtimePublisher).publish(
                 eq(RECIPIENT_ID),
@@ -141,7 +142,7 @@ class ChatMessageServiceTest {
     @Test
     void does_not_create_another_notification_when_the_room_already_has_unread_messages() {
         stubNewMessagePath(0);
-        when(chatMessageRepository.countUnreadMessages(ROOM_ID, RECIPIENT_ID, ChatMessageStatus.SENT))
+        when(chatMessageRepository.existsUnreadMessages(ROOM_ID, RECIPIENT_ID))
                 .thenReturn(1L);
         when(room.getId()).thenReturn(ROOM_ID);
         when(sender.id()).thenReturn(SENDER_ID);
@@ -212,6 +213,7 @@ class ChatMessageServiceTest {
 
         assertThat(response.messageSequence()).isEqualTo(4L);
         assertThat(response.content()).isEqualTo("hello");
+        verify(notificationService, never()).notifyNewMessage(any(), any(), any());
         verify(chatMessageRepository, never()).countSentBySenderSince(
                 eq(SENDER_ID),
                 eq(ChatMessageStatus.SENT),

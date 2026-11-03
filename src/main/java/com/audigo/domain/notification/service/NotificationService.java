@@ -13,6 +13,7 @@ import com.audigo.domain.notification.entity.Notification;
 import com.audigo.domain.notification.entity.NotificationSetting;
 import com.audigo.domain.notification.entity.NotificationTargetType;
 import com.audigo.domain.notification.entity.NotificationType;
+import com.audigo.domain.notification.realtime.NotificationRealtimePublisher;
 import com.audigo.domain.notification.repository.NotificationRepository;
 import com.audigo.domain.notification.repository.NotificationSettingRepository;
 import com.audigo.domain.user.entity.User;
@@ -23,7 +24,10 @@ import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @Service
@@ -35,17 +39,20 @@ public class NotificationService {
     private final NotificationSettingRepository notificationSettingRepository;
     private final UserRepository userRepository;
     private final NotificationSseService notificationSseService;
+    private final NotificationRealtimePublisher realtimePublisher;
 
     public NotificationService(
             NotificationRepository notificationRepository,
             NotificationSettingRepository notificationSettingRepository,
             UserRepository userRepository,
-            NotificationSseService notificationSseService
+            NotificationSseService notificationSseService,
+            NotificationRealtimePublisher realtimePublisher
     ) {
         this.notificationRepository = notificationRepository;
         this.notificationSettingRepository = notificationSettingRepository;
         this.userRepository = userRepository;
         this.notificationSseService = notificationSseService;
+        this.realtimePublisher = realtimePublisher;
     }
 
     @Transactional(readOnly = true)
@@ -144,14 +151,7 @@ public class NotificationService {
                 command.targetId()
         ));
         NotificationResponse response = NotificationResponse.from(notification);
-        notificationSseService.sendNotification(user.id(), response);
-        log.info("notification_created user_id={} notification_id={} type={} target_type={} target_id={}",
-                user.id(),
-                notification.id(),
-                command.notificationType(),
-                command.targetType(),
-                command.targetId()
-        );
+        publishAfterCommit(user.id(), response);
         return NotificationCreateResult.created(response);
     }
 
@@ -167,7 +167,8 @@ public class NotificationService {
         ));
     }
 
-    @Transactional
+    // ChatMessageService calls this after its transaction has already committed.
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public NotificationCreateResult notifyNewMessage(Long userId, Long chatRoomId, String content) {
         return create(new CreateNotificationCommand(
                 userId,
@@ -214,6 +215,28 @@ public class NotificationService {
                 NotificationTargetType.TRAVEL_PLAN,
                 travelPlanId
         ));
+    }
+
+    private void publishAfterCommit(Long userId, NotificationResponse response) {
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                log.info("notification_created user_id={} notification_id={} type={} target_type={} target_id={}",
+                        userId,
+                        response.notificationId(),
+                        response.type(),
+                        response.targetType(),
+                        response.targetId()
+                );
+                try {
+                    realtimePublisher.publish(userId, response);
+                } catch (RuntimeException exception) {
+                    // The notification is already committed and remains available through the list API.
+                    log.warn("notification_realtime_publish_failed user_id={} notification_id={}",
+                            userId, response.notificationId(), exception);
+                }
+            }
+        });
     }
 
     private NotificationSetting findOrCreateSettings(Long userId) {

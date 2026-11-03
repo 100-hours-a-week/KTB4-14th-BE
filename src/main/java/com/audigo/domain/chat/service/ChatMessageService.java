@@ -111,11 +111,7 @@ public class ChatMessageService {
 
         LocalDateTime sentAt = LocalDateTime.now(ZoneOffset.UTC);
         enforceRateLimit(userId, sentAt);
-        boolean shouldNotifyRecipient = chatMessageRepository.countUnreadMessages(
-                roomId,
-                recipientUserId,
-                ChatMessageStatus.SENT
-        ) == 0;
+        boolean shouldNotifyRecipient = chatMessageRepository.existsUnreadMessages(roomId, recipientUserId) == 0;
 
         long messageSequence = room.recordMessage(sentAt);
         ChatMessage message = chatMessageRepository.saveAndFlush(ChatMessage.create(
