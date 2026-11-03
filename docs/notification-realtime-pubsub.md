@@ -129,6 +129,11 @@ FE는 필요한 경우 토큰 갱신 또는 재로그인 후 재구독하고, �
 A→B는 `NEW_MESSAGE` 알림 ID 6, B→A는 전송 응답 201 및 알림 ID 7 수신을 확인했다.
 이 기록은 heartbeat·인증 보존 수정 이전 기본 전달 검증이며, 최종 dev 환경 검증은 별도로 진행한다.
 
+2026-11-03 최종 자동 검증: Java 21에서 `gradlew.bat test bootJar --console=plain` 성공.
+전체 테스트 322개 통과, 실패·오류·스킵 0개이며 실행 JAR 빌드도 성공했다.
+최신 development의 채팅 미읽음 EXISTS 개선을 반영한 상태에서 검증했다.
+테스트용 Redis와 임베디드 HTTP 서버를 사용했으며 실제 BE·기존 DB·`redis-local` 설정은 변경하지 않았다.
+
 ## 후속 로컬 검증 준비
 
 전체 BE를 두 개 실행할 때는 `SERVER_PORT`만 각각 `8080`, `8081`로 나눈다.
