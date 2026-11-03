@@ -2,8 +2,7 @@ package com.audigo.domain.notification.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -11,26 +10,34 @@ import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
+import com.audigo.domain.notification.config.NotificationRealtimeProperties;
 import com.audigo.domain.notification.dto.CreateNotificationCommand;
 import com.audigo.domain.notification.dto.NotificationResponse;
 import com.audigo.domain.notification.entity.Notification;
 import com.audigo.domain.notification.entity.NotificationSetting;
 import com.audigo.domain.notification.entity.NotificationTargetType;
 import com.audigo.domain.notification.entity.NotificationType;
+import com.audigo.domain.notification.realtime.NotificationRealtimePublisher;
 import com.audigo.domain.notification.repository.NotificationRepository;
 import com.audigo.domain.notification.repository.NotificationSettingRepository;
 import com.audigo.domain.user.entity.User;
 import com.audigo.domain.user.repository.UserRepository;
+import com.audigo.global.config.JacksonConfig;
 import jakarta.persistence.EntityManagerFactory;
 import java.util.Map;
 import javax.sql.DataSource;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+import org.springframework.data.redis.RedisConnectionFailureException;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.orm.jpa.JpaTransactionManager;
@@ -51,6 +58,7 @@ class NotificationServiceTransactionTest {
 
     @Autowired private NotificationService service;
     @Autowired private NotificationSseService sseService;
+    @Autowired private StringRedisTemplate redisTemplate;
     @Autowired private UserRepository users;
     @Autowired private NotificationSettingRepository settings;
     @Autowired private PlatformTransactionManager transactionManager;
@@ -61,9 +69,14 @@ class NotificationServiceTransactionTest {
 
     @BeforeEach
     void setUp() {
-        reset(sseService);
+        reset(sseService, redisTemplate);
         transaction = new TransactionTemplate(transactionManager);
         userId = users.saveAndFlush(User.create("수신자", null)).id();
+    }
+
+    @AfterEach
+    void does_not_bypass_redis_with_direct_sse_delivery() {
+        verifyNoInteractions(sseService);
     }
 
     @Test
@@ -72,7 +85,7 @@ class NotificationServiceTransactionTest {
         transaction.executeWithoutResult(status -> {
             registerChatNotification();
             assertThat(committedNotificationCount()).isZero();
-            verifyNoInteractions(sseService);
+            verifyNoInteractions(redisTemplate);
         });
 
         assertThat(committedNotificationCount()).isEqualTo(1);
@@ -85,55 +98,55 @@ class NotificationServiceTransactionTest {
             assertThat(notification.isRead()).isFalse();
         });
         assertThat(service.unreadCount(userId).count()).isEqualTo(1);
-        verify(sseService).sendNotification(eq(userId), any(NotificationResponse.class));
+        verify(redisTemplate).convertAndSend(anyString(), anyString());
     }
 
     @Test
-    void sse_observes_committed_notification_on_an_independent_connection() {
+    void redis_publication_observes_committed_notification_on_an_independent_connection() {
         doAnswer(invocation -> {
-            NotificationResponse response = invocation.getArgument(1);
-            assertThat(response.notificationId()).isNotNull();
+            String json = invocation.getArgument(1);
+            assertThat(json).contains("\"notification_id\":", "\"recipientUserId\":" + userId);
             assertThat(committedNotificationCount()).isEqualTo(1);
-            return null;
-        }).when(sseService).sendNotification(eq(userId), any(NotificationResponse.class));
+            return 1L;
+        }).when(redisTemplate).convertAndSend(anyString(), anyString());
 
         transaction.executeWithoutResult(status -> registerChatNotification());
 
-        verify(sseService).sendNotification(eq(userId), any(NotificationResponse.class));
+        verify(redisTemplate).convertAndSend(anyString(), anyString());
     }
 
     @Test
-    void rolled_back_chat_transaction_does_not_create_notification_or_send_sse() {
+    void rolled_back_chat_transaction_does_not_create_notification_or_publish() {
         transaction.executeWithoutResult(status -> {
             registerChatNotification();
             status.setRollbackOnly();
         });
 
         assertThat(committedNotificationCount()).isZero();
-        verifyNoInteractions(sseService);
+        verifyNoInteractions(redisTemplate);
     }
 
     @Test
-    void general_notification_sse_waits_for_commit() {
+    void general_notification_publication_waits_for_commit() {
         transaction.executeWithoutResult(status -> {
             service.create(command());
-            verifyNoInteractions(sseService);
+            verifyNoInteractions(redisTemplate);
             assertThat(committedNotificationCount()).isZero();
         });
 
         assertThat(committedNotificationCount()).isEqualTo(1);
-        verify(sseService).sendNotification(eq(userId), any(NotificationResponse.class));
+        verify(redisTemplate).convertAndSend(anyString(), anyString());
     }
 
     @Test
-    void rolled_back_notification_does_not_send_sse() {
+    void rolled_back_notification_does_not_publish() {
         transaction.executeWithoutResult(status -> {
             service.create(command());
             status.setRollbackOnly();
         });
 
         assertThat(committedNotificationCount()).isZero();
-        verifyNoInteractions(sseService);
+        verifyNoInteractions(redisTemplate);
     }
 
     @Test
@@ -143,7 +156,7 @@ class NotificationServiceTransactionTest {
         transaction.executeWithoutResult(status -> registerChatNotification());
 
         assertThat(committedNotificationCount()).isZero();
-        verifyNoInteractions(sseService);
+        verifyNoInteractions(redisTemplate);
     }
 
     @Test
@@ -153,20 +166,38 @@ class NotificationServiceTransactionTest {
         transaction.executeWithoutResult(status -> registerChatNotification());
 
         assertThat(committedNotificationCount()).isZero();
-        verifyNoInteractions(sseService);
+        verifyNoInteractions(redisTemplate);
     }
 
     @Test
-    void sse_failure_does_not_undo_persistence_or_fail_the_caller() {
-        doThrow(new IllegalStateException("disconnected"))
-                .when(sseService).sendNotification(eq(userId), any(NotificationResponse.class));
+    void redis_failure_does_not_undo_persistence_or_fail_the_caller() {
+        doThrow(new RedisConnectionFailureException("disconnected"))
+                .when(redisTemplate).convertAndSend(anyString(), anyString());
 
         assertThatCode(() -> service.notifyNewMessage(userId, ROOM_ID, "새 메시지"))
                 .doesNotThrowAnyException();
 
         assertThat(committedNotificationCount()).isEqualTo(1);
         assertThat(service.unreadCount(userId).count()).isEqualTo(1);
-        verify(sseService).sendNotification(eq(userId), any(NotificationResponse.class));
+        verify(redisTemplate).convertAndSend(anyString(), anyString());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = NotificationType.class, names = {"MATCH_SUCCESS", "TRAVEL_COMPLETE", "TRAVEL_FAILED"})
+    void matching_and_travel_entry_points_use_the_same_committed_publication_path(NotificationType type) {
+        transaction.executeWithoutResult(status -> {
+            switch (type) {
+                case MATCH_SUCCESS -> service.notifyMatchSuccess(userId, 21L, "매칭 성공");
+                case TRAVEL_COMPLETE -> service.notifyTravelComplete(userId, 31L, "여행 추천 완료");
+                case TRAVEL_FAILED -> service.notifyTravelFailed(userId, 31L, "여행 생성 실패");
+                default -> throw new IllegalArgumentException("Unexpected notification type");
+            }
+            verifyNoInteractions(redisTemplate);
+        });
+
+        assertThat(committedNotificationCount()).isEqualTo(1);
+        assertThat(service.list(userId)).singleElement().extracting(NotificationResponse::type).isEqualTo(type);
+        verify(redisTemplate).convertAndSend(anyString(), anyString());
     }
 
     private void registerChatNotification() {
@@ -202,7 +233,7 @@ class NotificationServiceTransactionTest {
     @Configuration(proxyBeanMethods = false)
     @EnableTransactionManagement
     @EnableJpaRepositories(basePackageClasses = {UserRepository.class, NotificationRepository.class})
-    @Import(NotificationService.class)
+    @Import({NotificationService.class, NotificationRealtimePublisher.class, JacksonConfig.class})
     static class Config {
         @Bean
         DataSource dataSource() {
@@ -228,6 +259,16 @@ class NotificationServiceTransactionTest {
         @Bean
         NotificationSseService notificationSseService() {
             return mock(NotificationSseService.class);
+        }
+
+        @Bean
+        StringRedisTemplate redisTemplate() {
+            return mock(StringRedisTemplate.class);
+        }
+
+        @Bean
+        NotificationRealtimeProperties notificationRealtimeProperties() {
+            return new NotificationRealtimeProperties("audigo-be", "test", "");
         }
     }
 }
