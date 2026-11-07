@@ -5,6 +5,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Supplier;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.dao.QueryTimeoutException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.data.redis.core.script.RedisScript;
@@ -41,13 +44,13 @@ public class RedisRefreshSessionStore {
 
     boolean create(RefreshSessionToken token, Long userId, String deviceId, Duration ttl) {
         RefreshSessionData session = new RefreshSessionData(userId, deviceId, token.secretHash());
-        return Boolean.TRUE.equals(redisTemplate.opsForValue().setIfAbsent(
+        return withAvailability(() -> Boolean.TRUE.equals(redisTemplate.opsForValue().setIfAbsent(
                 key(token.sessionId()), serialize(session), ttl
-        ));
+        )));
     }
 
     Optional<RefreshSessionData> find(String sessionId) {
-        String value = redisTemplate.opsForValue().get(key(sessionId));
+        String value = withAvailability(() -> redisTemplate.opsForValue().get(key(sessionId)));
         if (value == null) {
             return Optional.empty();
         }
@@ -62,22 +65,22 @@ public class RedisRefreshSessionStore {
         if (!current.sessionId().equals(next.sessionId())) {
             throw new IllegalArgumentException("Session ID must remain unchanged during rotation.");
         }
-        Long result = redisTemplate.execute(
+        Long result = withAvailability(() -> redisTemplate.execute(
                 ROTATE_SCRIPT,
                 List.of(key(current.sessionId())),
                 current.secretHash(),
                 next.secretHash(),
                 Long.toString(ttl.toSeconds())
-        );
+        ));
         return Long.valueOf(1).equals(result);
     }
 
     boolean revoke(RefreshSessionToken token) {
-        Long result = redisTemplate.execute(
+        Long result = withAvailability(() -> redisTemplate.execute(
                 REVOKE_SCRIPT,
                 List.of(key(token.sessionId())),
                 token.secretHash()
-        );
+        ));
         return Long.valueOf(1).equals(result);
     }
 
@@ -91,6 +94,14 @@ public class RedisRefreshSessionStore {
 
     private String key(String sessionId) {
         return KEY_PREFIX + sessionId;
+    }
+
+    private <T> T withAvailability(Supplier<T> operation) {
+        try {
+            return operation.get();
+        } catch (DataAccessResourceFailureException | QueryTimeoutException exception) {
+            throw new AuthSessionUnavailableException(exception);
+        }
     }
 
     private static RedisScript<Long> script(String source) {
