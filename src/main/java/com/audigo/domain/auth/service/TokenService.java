@@ -1,80 +1,83 @@
 package com.audigo.domain.auth.service;
 
 import com.audigo.domain.auth.dto.AuthTokens;
-import com.audigo.domain.auth.entity.RefreshToken;
 import com.audigo.domain.auth.token.JwtTokenProvider;
-import com.audigo.domain.auth.repository.RefreshTokenRepository;
 import com.audigo.domain.user.entity.User;
 import com.audigo.domain.user.repository.UserRepository;
 import com.audigo.global.error.BusinessException;
 import com.audigo.global.error.ErrorCode;
-import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
+import java.time.Duration;
 import java.util.Optional;
-import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class TokenService {
 
     private final long accessTokenTtlSeconds;
     private final long refreshTokenTtlSeconds;
-    private final RefreshTokenRepository refreshTokenRepository;
+    private final RedisRefreshSessionStore refreshSessionStore;
     private final UserRepository userRepository;
     private final JwtTokenProvider jwtTokenProvider;
 
     public TokenService(
             @Value("${audigo.auth.access-token-ttl-seconds}") long accessTokenTtlSeconds,
             @Value("${audigo.auth.refresh-token-ttl-seconds}") long refreshTokenTtlSeconds,
-            RefreshTokenRepository refreshTokenRepository,
+            RedisRefreshSessionStore refreshSessionStore,
             UserRepository userRepository,
             JwtTokenProvider jwtTokenProvider
     ) {
         this.accessTokenTtlSeconds = accessTokenTtlSeconds;
         this.refreshTokenTtlSeconds = refreshTokenTtlSeconds;
-        this.refreshTokenRepository = refreshTokenRepository;
+        this.refreshSessionStore = refreshSessionStore;
         this.userRepository = userRepository;
         this.jwtTokenProvider = jwtTokenProvider;
     }
 
-    @Transactional
     public AuthTokens issue(Long userId) {
-        String accessToken = jwtTokenProvider.createAccessToken(userId, accessTokenTtlSeconds);
-        String refreshToken = "AUDIGO_REFRESH_" + UUID.randomUUID();
-        Instant now = Instant.now();
-
-        User user = findActiveUser(userId);
-        refreshTokenRepository.save(RefreshToken.create(
-                user,
-                TokenHash.sha256(refreshToken),
-                LocalDateTime.ofInstant(now.plusSeconds(refreshTokenTtlSeconds), ZoneId.systemDefault())
-        ));
-
-        return new AuthTokens(accessToken, refreshToken, accessTokenTtlSeconds, refreshTokenTtlSeconds);
+        findActiveUser(userId);
+        for (int attempt = 0; attempt < 3; attempt++) {
+            RefreshSessionToken token = RefreshSessionToken.create();
+            if (refreshSessionStore.create(token, userId, null, refreshTtl())) {
+                return tokens(userId, token);
+            }
+        }
+        throw new IllegalStateException("Failed to allocate a refresh session ID.");
     }
 
-    @Transactional
     public AuthTokens refresh(String refreshToken) {
-        RefreshToken storedToken = refreshTokenRepository.findByTokenHash(TokenHash.sha256(refreshToken))
-                .orElseThrow(() -> new BusinessException(ErrorCode.REFRESH_TOKEN_NOT_FOUND));
-        if (!storedToken.isUsable()) {
+        RefreshSessionToken current = RefreshSessionToken.parse(refreshToken)
+                .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_REFRESH_TOKEN));
+        RefreshSessionData session = refreshSessionStore.find(current.sessionId())
+                .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_REFRESH_TOKEN));
+        if (!session.secretHash().equals(current.secretHash())) {
             throw new BusinessException(ErrorCode.INVALID_REFRESH_TOKEN);
         }
-        storedToken.revoke();
-        return issue(storedToken.user().id());
+        findActiveUser(session.userId());
+
+        RefreshSessionToken next = current.rotate();
+        AuthTokens tokens = tokens(session.userId(), next);
+        if (!refreshSessionStore.rotate(current, next, refreshTtl())) {
+            throw new BusinessException(ErrorCode.INVALID_REFRESH_TOKEN);
+        }
+        return tokens;
     }
 
-    @Transactional
     public void revoke(String refreshToken) {
-        refreshTokenRepository.findByTokenHash(TokenHash.sha256(refreshToken))
-                .ifPresent(RefreshToken::revoke);
+        RefreshSessionToken.parse(refreshToken).ifPresent(refreshSessionStore::revoke);
     }
 
     public Optional<Long> findUserIdByAccessToken(String accessToken) {
         return jwtTokenProvider.parseAccessToken(accessToken);
+    }
+
+    private AuthTokens tokens(Long userId, RefreshSessionToken token) {
+        String accessToken = jwtTokenProvider.createAccessToken(userId, accessTokenTtlSeconds);
+        return new AuthTokens(accessToken, token.value(), accessTokenTtlSeconds, refreshTokenTtlSeconds);
+    }
+
+    private Duration refreshTtl() {
+        return Duration.ofSeconds(refreshTokenTtlSeconds);
     }
 
     private User findActiveUser(Long userId) {
