@@ -5,6 +5,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import java.time.Duration;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -53,5 +57,53 @@ class RedisRefreshSessionStoreIntegrationTest {
         assertThat(store.find(token.sessionId())).contains(new RefreshSessionData(42L, null, token.secretHash()));
         assertThat(redisTemplate.getExpire("auth:refresh_token:" + token.sessionId())).isBetween(1L, ttl.toSeconds());
         assertThat(store.create(token, 42L, null, ttl)).isFalse();
+    }
+
+    @Test
+    void rotationChangesSecretAndResetsExpiry() {
+        RefreshSessionToken original = RefreshSessionToken.create();
+        RefreshSessionToken rotated = original.rotate();
+        assertThat(store.create(original, 42L, null, Duration.ofMinutes(1))).isTrue();
+
+        assertThat(store.rotate(original, rotated, Duration.ofDays(14))).isTrue();
+
+        assertThat(store.find(original.sessionId())).contains(
+                new RefreshSessionData(42L, null, rotated.secretHash())
+        );
+        assertThat(redisTemplate.getExpire("auth:refresh_token:" + original.sessionId()))
+                .isGreaterThan(Duration.ofDays(13).toSeconds());
+        assertThat(store.rotate(original, original.rotate(), Duration.ofDays(14))).isFalse();
+        assertThat(store.revoke(original)).isFalse();
+        assertThat(store.revoke(rotated)).isTrue();
+        assertThat(store.find(original.sessionId())).isEmpty();
+    }
+
+    @Test
+    void concurrentRotationAllowsOnlyOneRequest() throws Exception {
+        RefreshSessionToken original = RefreshSessionToken.create();
+        assertThat(store.create(original, 42L, null, Duration.ofDays(14))).isTrue();
+        CountDownLatch start = new CountDownLatch(1);
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<Boolean> first = executor.submit(() -> {
+                start.await();
+                return store.rotate(original, original.rotate(), Duration.ofDays(14));
+            });
+            Future<Boolean> second = executor.submit(() -> {
+                start.await();
+                return store.rotate(original, original.rotate(), Duration.ofDays(14));
+            });
+            start.countDown();
+            assertThat((first.get() ? 1 : 0) + (second.get() ? 1 : 0)).isEqualTo(1);
+        }
+    }
+
+    @Test
+    void expiredSessionCannotBeRotatedOrRevoked() throws InterruptedException {
+        RefreshSessionToken token = RefreshSessionToken.create();
+        assertThat(store.create(token, 42L, null, Duration.ofMillis(100))).isTrue();
+        Thread.sleep(200);
+
+        assertThat(store.rotate(token, token.rotate(), Duration.ofDays(14))).isFalse();
+        assertThat(store.revoke(token)).isFalse();
     }
 }
