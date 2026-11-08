@@ -51,7 +51,7 @@ gradle bootRun
 
 If Gradle is not installed on PATH, run `bootRun` from the IntelliJ Gradle tool window after reimporting the project.
 
-Refresh tokens remain in MySQL in `refresh_tokens`, and access tokens are signed JWTs. Redis is configured for the upcoming chat presence change; login session clustering is not part of this work.
+Refresh token은 Redis의 `auth:refresh_token:{sessionId}` 키에 14일 TTL로 저장합니다. Redis 값에는 사용자 ID와 토큰 비밀 값의 해시가 들어가며, 재발급 시 비밀 값과 TTL을 교체합니다. 기존 MySQL `refresh_tokens` 기록은 읽지 않으므로 전환 후 기존 사용자는 다시 로그인해야 합니다. Access token은 서명된 JWT로 유지됩니다.
 
 If Hibernate already created old development tables before the ERD column names were aligned, recreate the local schema once:
 

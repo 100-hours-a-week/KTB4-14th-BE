@@ -42,7 +42,7 @@ public class AuthController {
     @PostMapping("/refresh")
     public ResponseEntity<ApiResponse<Void>> refresh(HttpServletRequest request) {
         String refreshToken = authCookieManager.readRefreshToken(request)
-                .orElseThrow(() -> new BusinessException(ErrorCode.REFRESH_TOKEN_REQUIRED));
+                .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_REFRESH_TOKEN));
         AuthTokens tokens = authService.refresh(refreshToken);
         return ResponseEntity.ok()
                 .headers(authCookieManager.issue(tokens))
