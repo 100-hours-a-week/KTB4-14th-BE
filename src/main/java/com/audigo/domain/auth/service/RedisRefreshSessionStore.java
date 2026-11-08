@@ -23,7 +23,7 @@ public class RedisRefreshSessionStore {
             local session = cjson.decode(value)
             if session.secretHash ~= ARGV[1] then return 0 end
             session.secretHash = ARGV[2]
-            redis.call('SET', KEYS[1], cjson.encode(session), 'EX', ARGV[3])
+            redis.call('SET', KEYS[1], cjson.encode({userId = session.userId, secretHash = ARGV[2]}), 'EX', ARGV[3])
             return 1
             """);
     private static final RedisScript<Long> REVOKE_SCRIPT = script("""
@@ -42,8 +42,8 @@ public class RedisRefreshSessionStore {
         this.objectMapper = objectMapper;
     }
 
-    boolean create(RefreshSessionToken token, Long userId, String deviceId, Duration ttl) {
-        RefreshSessionData session = new RefreshSessionData(userId, deviceId, token.secretHash());
+    boolean create(RefreshSessionToken token, Long userId, Duration ttl) {
+        RefreshSessionData session = new RefreshSessionData(userId, token.secretHash());
         return withAvailability(() -> Boolean.TRUE.equals(redisTemplate.opsForValue().setIfAbsent(
                 key(token.sessionId()), serialize(session), ttl
         )));

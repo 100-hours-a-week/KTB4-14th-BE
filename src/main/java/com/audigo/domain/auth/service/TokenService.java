@@ -38,7 +38,7 @@ public class TokenService {
         findActiveUser(userId);
         for (int attempt = 0; attempt < 3; attempt++) {
             RefreshSessionToken token = RefreshSessionToken.create();
-            if (refreshSessionStore.create(token, userId, null, refreshTtl())) {
+            if (refreshSessionStore.create(token, userId, refreshTtl())) {
                 return tokens(userId, token);
             }
         }

@@ -38,14 +38,14 @@ class TokenServiceTest {
     @Test
     void loginIssuesRedisBackedRefreshToken() {
         activeUser(42L);
-        when(store.create(any(), eq(42L), eq(null), eq(Duration.ofDays(14)))).thenReturn(true);
+        when(store.create(any(), eq(42L), eq(Duration.ofDays(14)))).thenReturn(true);
         when(jwt.createAccessToken(42L, 3600)).thenReturn("access");
 
         AuthTokens tokens = service.issue(42L);
 
         assertThat(RefreshSessionToken.parse(tokens.refreshToken())).isPresent();
         assertThat(tokens.accessToken()).isEqualTo("access");
-        verify(store).create(any(), eq(42L), eq(null), eq(Duration.ofDays(14)));
+        verify(store).create(any(), eq(42L), eq(Duration.ofDays(14)));
     }
 
     @Test
@@ -53,7 +53,7 @@ class TokenServiceTest {
         RefreshSessionToken current = RefreshSessionToken.create();
         activeUser(42L);
         when(store.find(current.sessionId()))
-                .thenReturn(Optional.of(new RefreshSessionData(42L, null, current.secretHash())));
+                .thenReturn(Optional.of(new RefreshSessionData(42L, current.secretHash())));
         when(store.rotate(eq(current), any(), eq(Duration.ofDays(14)))).thenReturn(true);
         when(jwt.createAccessToken(42L, 3600)).thenReturn("access");
 
@@ -77,7 +77,7 @@ class TokenServiceTest {
         RefreshSessionToken current = RefreshSessionToken.create();
         activeUser(42L);
         when(store.find(current.sessionId()))
-                .thenReturn(Optional.of(new RefreshSessionData(42L, null, current.secretHash())));
+                .thenReturn(Optional.of(new RefreshSessionData(42L, current.secretHash())));
         when(store.rotate(eq(current), any(), eq(Duration.ofDays(14)))).thenReturn(false);
 
         assertThatThrownBy(() -> service.refresh(current.value()))
