@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.LinkedHashSet;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -19,9 +20,17 @@ import org.springframework.stereotype.Component;
 public class TagoBusStopLookupService {
 
     private final TagoBusStopClient tagoBusStopClient;
+    private final TagoBusStopNameCanonicalizer canonicalizer;
+
+    @Autowired
+    public TagoBusStopLookupService(TagoBusStopClient tagoBusStopClient,
+                                    TagoBusStopNameCanonicalizer canonicalizer) {
+        this.tagoBusStopClient = tagoBusStopClient;
+        this.canonicalizer = canonicalizer;
+    }
 
     public TagoBusStopLookupService(TagoBusStopClient tagoBusStopClient) {
-        this.tagoBusStopClient = tagoBusStopClient;
+        this(tagoBusStopClient, new TagoBusStopNameCanonicalizer());
     }
 
     public List<TagoStopIdentifier> findCandidates(RouteSegment route, RouteSegmentLeg leg) {
@@ -53,7 +62,7 @@ public class TagoBusStopLookupService {
         Set<TagoStopIdentifier> candidates = new LinkedHashSet<>();
         String stopName = leg.getBoardingStopName().trim();
         for (String cityCode : cityCodes) {
-            tagoBusStopClient.findStopsByName(cityCode, stopName).stream()
+            tagoBusStopClient.findStopsByName(cityCode, canonicalizer.canonicalize(cityCode, stopName)).stream()
                     .map(TagoBusStopClient.Stop::nodeId)
                     .filter(nodeId -> !isBlank(nodeId))
                     .map(String::trim)
