@@ -29,7 +29,8 @@ import org.springframework.web.context.WebApplicationContext;
         classes = SecurityConfigTest.TestApplication.class,
         properties = {
                 "spring.config.name=security-test",
-                "management.endpoints.web.exposure.include=health,prometheus"
+                "management.endpoints.web.exposure.include=health,prometheus",
+                "management.health.redis.enabled=false"
         }
 )
 class SecurityConfigTest {
@@ -49,7 +50,7 @@ class SecurityConfigTest {
     @Test
     void monitoring_ip_can_scrape_real_prometheus_metrics_without_authentication() throws Exception {
         mockMvc.perform(get("/actuator/prometheus").with(request -> {
-                    request.setRemoteAddr("10.0.10.230");
+                    request.setRemoteAddr("10.1.10.230");
                     return request;
                 }))
                 .andExpect(status().isOk())
@@ -59,7 +60,7 @@ class SecurityConfigTest {
     @Test
     void another_ip_cannot_scrape_even_with_a_forwarded_monitoring_ip() throws Exception {
         mockMvc.perform(get("/actuator/prometheus")
-                        .header("X-Forwarded-For", "10.0.10.230")
+                        .header("X-Forwarded-For", "10.1.10.230")
                         .with(request -> {
                             request.setRemoteAddr("10.0.10.231");
                             return request;
@@ -87,7 +88,7 @@ class SecurityConfigTest {
     @Test
     void monitoring_ip_still_requires_authentication_for_other_api_paths() throws Exception {
         mockMvc.perform(get("/users/me").with(request -> {
-                    request.setRemoteAddr("10.0.10.230");
+                    request.setRemoteAddr("10.1.10.230");
                     return request;
                 }))
                 .andExpect(status().isForbidden());

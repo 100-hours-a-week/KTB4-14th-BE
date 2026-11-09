@@ -1,14 +1,17 @@
 name: PR CI
 
+# development·main 대상 PR에서 테스트와 이미지 빌드 가능 여부를 확인합니다.
+# Draft PR도 일반 CI 대상이며, 이미지 Push나 배포는 수행하지 않습니다.
 on:
   pull_request:
-    branches: [development]
+    branches: [development, main]
 
 # 같은 PR에 연속 push 시 이전 CI 취소
 concurrency:
   group: ci-pr-${{ github.ref }}
   cancel-in-progress: true
 
+# 소스 checkout에 필요한 읽기 권한만 부여합니다.
 permissions:
   contents: read
 
@@ -17,19 +20,41 @@ jobs:
     # ARM64 이미지를 직접 빌드하므로 QEMU 에뮬레이션이 불필요
     runs-on: ubuntu-24.04-arm
     steps:
+      # 외부 Actions는 검토한 커밋 SHA로 고정하고 Git 자격증명은 남기지 않습니다.
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          persist-credentials: false # checkout 이후 Git 명령용 인증 정보를 유지하지 않음
+          persist-credentials: false
+
+      - name: Java 21 설정
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # Dockerfile의 bootJar만으로는 테스트가 실행되지 않아 별도 게이트로 둡니다.
+      - name: Gradle 테스트 실행
+        run: ./gradlew test --no-daemon
+
+      # 테스트 실패 원인을 PR에서 확인할 수 있도록 보고서를 artifact로 보관합니다.
+      - name: 테스트 실패 보고서 보관
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gradle-test-reports
+          path: |
+            build/reports/tests/test/
+            build/test-results/test/
+          if-no-files-found: warn
 
       - name: 도커 빌드 환경 세팅
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
+      # 테스트가 통과한 경우에만 ARM64 Docker 빌드를 확인합니다. registry에는 올리지 않습니다.
       - name: 도커 이미지 빌드 테스트 실행
-        # Dockerfile에 정의된 빌드 수행
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          platforms: linux/arm64 # 결과 이미지의 대상 OS와 CPU 구조
+          platforms: linux/arm64
           push: false
           tags: audigo-backend:ci-test
