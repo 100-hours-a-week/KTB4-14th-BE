@@ -1,6 +1,7 @@
 # AUDIGO-BE
 
 AUDIGO backend scaffold.
+CI/CD smoke test: verify PR checks and staging GitOps delivery after merging into main.
 
 ## Stack
 
