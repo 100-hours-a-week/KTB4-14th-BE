@@ -20,13 +20,23 @@ import org.springframework.stereotype.Component;
 public class TagoBusStopLookupService {
 
     private final TagoBusStopClient tagoBusStopClient;
+    private final TagoBusStopCacheService cacheService;
     private final TagoBusStopNameCanonicalizer canonicalizer;
 
     @Autowired
     public TagoBusStopLookupService(TagoBusStopClient tagoBusStopClient,
+                                    TagoBusStopNameCanonicalizer canonicalizer,
+                                    TagoBusStopCacheService cacheService) {
+        this.tagoBusStopClient = tagoBusStopClient;
+        this.canonicalizer = canonicalizer;
+        this.cacheService = cacheService;
+    }
+
+    public TagoBusStopLookupService(TagoBusStopClient tagoBusStopClient,
                                     TagoBusStopNameCanonicalizer canonicalizer) {
         this.tagoBusStopClient = tagoBusStopClient;
         this.canonicalizer = canonicalizer;
+        this.cacheService = null;
     }
 
     public TagoBusStopLookupService(TagoBusStopClient tagoBusStopClient) {
@@ -51,7 +61,7 @@ public class TagoBusStopLookupService {
             return List.of();
         }
 
-        List<String> cityCodes = tagoBusStopClient.findCities().stream()
+        List<String> cityCodes = findCities().stream()
                 .filter(city -> !isBlank(city.cityCode()) && !isBlank(city.cityName()))
                 .filter(city -> matchesRegionCity(city.cityName(), regionNames))
                 .map(TagoBusStopClient.City::cityCode)
@@ -62,8 +72,7 @@ public class TagoBusStopLookupService {
         Set<TagoStopIdentifier> candidates = new LinkedHashSet<>();
         String stopName = leg.getBoardingStopName().trim();
         for (String cityCode : cityCodes) {
-            tagoBusStopClient.findStopsByName(cityCode, canonicalizer.canonicalize(cityCode, stopName)).stream()
-                    .map(TagoBusStopClient.Stop::nodeId)
+            findNodeIdsByName(cityCode, stopName).stream()
                     .filter(nodeId -> !isBlank(nodeId))
                     .map(String::trim)
                     .map(nodeId -> new TagoStopIdentifier(cityCode, nodeId))
@@ -71,6 +80,18 @@ public class TagoBusStopLookupService {
         }
 
         return candidates.stream().toList();
+    }
+
+    private List<TagoBusStopClient.City> findCities() {
+        return cacheService == null ? tagoBusStopClient.findCities() : cacheService.findCities();
+    }
+
+    private List<String> findNodeIdsByName(String cityCode, String stopName) {
+        if (cacheService != null) {
+            return cacheService.findNodeIdsByName(cityCode, stopName);
+        }
+        return tagoBusStopClient.findStopsByName(cityCode, canonicalizer.canonicalize(cityCode, stopName))
+                .stream().map(TagoBusStopClient.Stop::nodeId).toList();
     }
 
     private static boolean matchesRegionCity(String cityName, Set<String> normalizedRegionNames) {
