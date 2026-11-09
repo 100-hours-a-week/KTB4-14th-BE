@@ -25,7 +25,6 @@ public class TagoBusStopClient {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final String CITY_CODE_OPERATION = "getCtyCodeList";
     private static final String STOP_NAME_OPERATION = "getSttnNoList";
-    private static final int PAGE_NO = 1;
     private static final int NUM_OF_ROWS = 100;
 
     private final RestClient restClient;
@@ -72,10 +71,36 @@ public class TagoBusStopClient {
             throw new IllegalStateException("TAGO 서비스 키가 설정되지 않았습니다.");
         }
 
+        List<JsonNode> items = new ArrayList<>();
+        int pageNo = 1;
+        while (true) {
+            Page page = requestPage(operation, pageNo, stopQuery);
+            items.addAll(page.items());
+            if (page.totalCount() != null) {
+                if (items.size() > page.totalCount()) {
+                    throw new TagoBusStopException("TAGO 버스정류소정보 응답 건수가 전체 건수보다 많습니다.");
+                }
+                if (items.size() == page.totalCount()) {
+                    return List.copyOf(items);
+                }
+                if (page.items().isEmpty()) {
+                    throw new TagoBusStopException("TAGO 버스정류소정보 조회 중 페이지가 누락되었습니다.");
+                }
+            } else if (page.items().size() < NUM_OF_ROWS) {
+                if (items.isEmpty()) {
+                    throw new TagoBusStopException("TAGO 버스정류소정보의 빈 응답을 검증할 수 없습니다.");
+                }
+                return List.copyOf(items);
+            }
+            pageNo++;
+        }
+    }
+
+    private Page requestPage(String operation, int pageNo, String... stopQuery) {
         UriComponentsBuilder uriBuilder = UriComponentsBuilder
                 .fromUriString(endpoint(operation))
                 .queryParam("serviceKey", properties.serviceKey())
-                .queryParam("pageNo", PAGE_NO)
+                .queryParam("pageNo", pageNo)
                 .queryParam("numOfRows", NUM_OF_ROWS)
                 .queryParam("_type", "json");
         if (stopQuery.length > 0) {
@@ -90,7 +115,7 @@ public class TagoBusStopClient {
                     .headers(headers -> headers.setAccept(List.of(MediaType.APPLICATION_JSON)))
                     .retrieve()
                     .body(String.class);
-            return parseItems(responseBody);
+            return parsePage(responseBody);
         } catch (RestClientResponseException exception) {
             log.warn("TAGO 버스정류소정보 조회에 실패했습니다. status={}", exception.getStatusCode());
             throw new TagoBusStopException("TAGO 버스정류소정보 조회에 실패했습니다.", exception);
@@ -105,7 +130,7 @@ public class TagoBusStopClient {
         return properties.baseUrl() + separator + operation;
     }
 
-    private static List<JsonNode> parseItems(String responseBody) {
+    private static Page parsePage(String responseBody) {
         if (responseBody == null || responseBody.isBlank()) {
             throw new TagoBusStopException("TAGO 버스정류소정보 응답 본문이 비어 있습니다.");
         }
@@ -113,16 +138,39 @@ public class TagoBusStopClient {
             JsonNode root = OBJECT_MAPPER.readTree(responseBody);
             JsonNode header = root.path("response").path("header");
             String resultCode = text(header, "resultCode");
-            if (resultCode != null && !"0".equals(resultCode) && !"00".equals(resultCode)) {
+            if (!"0".equals(resultCode) && !"00".equals(resultCode)) {
                 throw new TagoBusStopException(
                         "TAGO 버스정류소정보 조회에 실패했습니다. code=" + resultCode
                                 + ", message=" + text(header, "resultMsg")
                 );
             }
 
+            JsonNode body = root.path("response").path("body");
+            if (!body.isObject()) {
+                throw new TagoBusStopException("TAGO 버스정류소정보 응답 본문 형식이 올바르지 않습니다.");
+            }
+            Integer totalCount = null;
+            JsonNode totalCountNode = body.path("totalCount");
+            if (!totalCountNode.isMissingNode() && !totalCountNode.isNull()) {
+                if (!totalCountNode.canConvertToInt() && !totalCountNode.isTextual()) {
+                    throw new TagoBusStopException("TAGO 버스정류소정보 전체 건수가 올바르지 않습니다.");
+                }
+                try {
+                    totalCount = Integer.parseInt(totalCountNode.asText());
+                } catch (NumberFormatException exception) {
+                    throw new TagoBusStopException("TAGO 버스정류소정보 전체 건수가 올바르지 않습니다.", exception);
+                }
+                if (totalCount < 0) {
+                    throw new TagoBusStopException("TAGO 버스정류소정보 전체 건수가 올바르지 않습니다.");
+                }
+            }
+
             JsonNode itemNode = root.path("response").path("body").path("items").path("item");
             if (itemNode.isMissingNode() || itemNode.isNull() || itemNode.isTextual()) {
-                return List.of();
+                if (totalCount != null && totalCount == 0) {
+                    return new Page(List.of(), 0);
+                }
+                throw new TagoBusStopException("TAGO 버스정류소정보 조회 결과를 확인할 수 없습니다.");
             }
 
             List<JsonNode> items = new ArrayList<>();
@@ -131,12 +179,15 @@ public class TagoBusStopClient {
             } else if (itemNode.isObject()) {
                 items.add(itemNode);
             }
-            return List.copyOf(items);
+            return new Page(List.copyOf(items), totalCount);
         } catch (TagoBusStopException exception) {
             throw exception;
         } catch (Exception exception) {
             throw new TagoBusStopException("TAGO 버스정류소정보 응답을 해석하지 못했습니다.", exception);
         }
+    }
+
+    private record Page(List<JsonNode> items, Integer totalCount) {
     }
 
     private static String text(JsonNode node, String... fieldNames) {
