@@ -1,14 +1,18 @@
 name: Notify Cloud of backend image
 
+# 이미지 발행이 끝난 뒤 알림 전용 workflow를 실행합니다.
+# workflow_run 수신에는 이 파일이 저장소 기본 브랜치에 존재해야 한다는 전제가 있습니다.
 on:
   workflow_run:
     workflows: [Publish backend image]
     types: [completed]
 
+# 기본 GITHUB_TOKEN 권한 없이, Cloud dispatch 전용 자격증명만 사용합니다.
 permissions: {}
 
 jobs:
   notify:
+    # 성공한 동일 BE 저장소의 main Push 발행만 허용합니다. PR·실패·취소 실행은 전달하지 않습니다.
     if: >-
       github.event.workflow_run.name == 'Publish backend image' &&
       github.event.workflow_run.conclusion == 'success' &&
@@ -17,9 +21,13 @@ jobs:
       github.event.workflow_run.head_repository.full_name == '100-hours-a-week/KTB4-14th-BE'
     runs-on: ubuntu-24.04
     steps:
+      # 소스 checkout이나 artifact 실행 없이 run ID·attempt만 전달합니다.
+      # Cloud가 이 식별자로 원본 run·artifact·registry를 독립적으로 다시 검증합니다.
+      # 수신 workflow가 Cloud main에 먼저 있어야 하므로 Cloud PR을 선병합합니다.
       - name: Dispatch Cloud staging workflow
         id: dispatch
         env:
+          # 다른 저장소의 Actions 실행을 요청하는 전용 토큰입니다. 기본 GITHUB_TOKEN과 별개입니다.
           GH_TOKEN: ${{ secrets.CLOUD_WORKFLOW_TOKEN }}
           RUN_ID: ${{ github.event.workflow_run.id }}
           RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
@@ -29,6 +37,7 @@ jobs:
           gh api --method POST repos/100-hours-a-week/KTB4-14th-Cloud/actions/workflows/backend-staging.yml/dispatches \
             -f ref=main -f "inputs[run_id]=$RUN_ID" -f "inputs[run_attempt]=$RUN_ATTEMPT" > /dev/null
 
+      # dispatch 수락 여부만 남깁니다. Cloud 처리·Git 반영·Pod Sync 완료와는 별도 결과입니다.
       - name: Record notification result
         if: always()
         env:
