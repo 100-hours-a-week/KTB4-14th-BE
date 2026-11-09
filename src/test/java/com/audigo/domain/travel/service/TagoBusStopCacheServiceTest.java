@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
+import org.springframework.data.redis.RedisConnectionFailureException;
 
 class TagoBusStopCacheServiceTest {
 
@@ -71,5 +72,18 @@ class TagoBusStopCacheServiceTest {
         assertThat(cache.findNodeIdsByName("31010", "수원 역")).containsExactly("SWA000001");
 
         verify(tagoClient, never()).findStopsByName(anyString(), anyString());
+    }
+
+    @Test
+    void Redis_조회_장애시_재시도나_저장_없이_TAGO로_우회한다() {
+        when(values.get(anyString())).thenThrow(new RedisConnectionFailureException("Redis unavailable"));
+        when(tagoClient.findStopsByName("31010", "수원역")).thenReturn(List.of(
+                new TagoBusStopClient.Stop("31010", "SWA000001", "수원역", "1234")));
+
+        assertThat(cache.findNodeIdsByName("31010", "수원 역")).containsExactly("SWA000001");
+
+        verify(values).get(anyString());
+        verify(values, never()).set(anyString(), anyString(), org.mockito.ArgumentMatchers.any(Duration.class));
+        verify(tagoClient).findStopsByName("31010", "수원역");
     }
 }

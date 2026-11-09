@@ -81,12 +81,18 @@ public class TagoBusStopCacheService {
         if (!properties.enabled()) {
             return loader.get();
         }
-        Optional<T> cached = read(cacheName, key, type);
-        if (cached.isPresent()) {
+        CacheRead<T> cached = read(cacheName, key, type);
+        if (!cached.available()) {
+            metric(cacheName, "bypass");
+            metric(cacheName, "source_lookup");
+            return loader.get();
+        }
+        if (cached.value().isPresent()) {
             metric(cacheName, "hit");
-            return cached.get();
+            return cached.value().get();
         }
         metric(cacheName, "miss");
+        metric(cacheName, "source_lookup");
         T loaded = loader.get();
         Duration ttl = ttlResolver.apply(loaded);
         if (ttl != null && !ttl.isZero() && !ttl.isNegative()) {
@@ -95,18 +101,19 @@ public class TagoBusStopCacheService {
         return loaded;
     }
 
-    private <T> Optional<T> read(String cacheName, String key, TypeReference<T> type) {
+    private <T> CacheRead<T> read(String cacheName, String key, TypeReference<T> type) {
         try {
             String value = redisTemplate.opsForValue().get(key);
-            return value == null ? Optional.empty() : Optional.of(objectMapper.readValue(value, type));
+            return new CacheRead<>(value == null ? Optional.empty()
+                    : Optional.ofNullable(objectMapper.readValue(value, type)), true);
         } catch (JsonProcessingException exception) {
             metric(cacheName, "deserialize_error");
             log.warn("TAGO 정류장 캐시 값 해석 실패. key={}", key, exception);
-            return Optional.empty();
+            return new CacheRead<>(Optional.empty(), true);
         } catch (DataAccessException exception) {
             metric(cacheName, "read_error");
             log.warn("TAGO 정류장 캐시 조회 실패. key={}", key, exception);
-            return Optional.empty();
+            return new CacheRead<>(Optional.empty(), false);
         }
     }
 
@@ -140,5 +147,8 @@ public class TagoBusStopCacheService {
         String encoded = Base64.getUrlEncoder().withoutPadding()
                 .encodeToString(queryName.getBytes(StandardCharsets.UTF_8));
         return KEY_PREFIX + "stops:" + cityCode + ":" + encoded;
+    }
+
+    private record CacheRead<T>(Optional<T> value, boolean available) {
     }
 }
