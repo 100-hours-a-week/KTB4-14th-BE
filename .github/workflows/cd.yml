@@ -1,11 +1,11 @@
-name: Backend Production CD
+name: BE ECS 운영 배포
 
 on:
   # main 반영만으로 자동 배포하지 않고 Cloud 담당자가 직접 실행
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release Version (예: v1.0.0)'
+        description: '배포할 릴리스 버전 (예: v1.0.0)'
         required: true
         type: string
 
@@ -28,7 +28,7 @@ jobs:
       IMAGE: ${{ vars.DOCKERHUB_IMAGE }}:sha-${{ github.sha }}
 
     steps:
-      - name: Checkout
+      - name: 소스 가져오기
         uses: actions/checkout@v7
         with:
           persist-credentials: false # Checkout 이후 Git 인증 정보가 Runner에 남지 않도록 설정

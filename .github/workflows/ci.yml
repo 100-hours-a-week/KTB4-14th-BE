@@ -1,4 +1,4 @@
-name: PR CI
+name: PR 검증
 
 # development·main 대상 PR에서 테스트와 이미지 빌드 가능 여부를 확인합니다.
 # Draft PR도 일반 CI 대상이며, 이미지 Push나 배포는 수행하지 않습니다.
@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-24.04-arm
     steps:
       # 외부 Actions는 검토한 커밋 SHA로 고정하고 Git 자격증명은 남기지 않습니다.
-      - name: Checkout
+      - name: 소스 가져오기
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
