@@ -8,9 +8,9 @@ UTC 변경은 ES 문서와 DB 검색 결과의 시각·정렬·커서 일치를 
 
 ## 검증 기록 (2026-11-12)
 
-- Java 21 / Gradle offline으로 채팅 단위·HTTP 어댑터 테스트 27개 클래스, **144건 통과**. 실패·오류·건너뜀 0건.
+- 최초 채팅 단위·HTTP 어댑터 검증은 27개 클래스, 144건 통과했다. 이후 최신 `development`(`ca04ef5`) 병합 후 Java 21 / Gradle offline으로 전체 비컨테이너 테스트 **85개 클래스, 404건 통과**. 실패·오류·건너뜀 0건.
 - `bootJar` 성공. 배포 JAR 생성까지 확인했으며 실제 배포는 하지 않음.
-- Docker daemon이 꺼져 있어 Testcontainers를 사용하는 기존 5개 클래스는 이번 실행 대상에서 제외. 이들은 통과 건수에 포함하지 않음. 실제 MySQL/ES/Redis 통합 검증의 과거 결과와 이번 단위 검증을 구분함.
+- Docker daemon이 꺼져 있어 Testcontainers를 사용하는 7개 클래스(채팅 5개, 인증·알림 각 1개)는 병합 후 실행 대상에서 제외. 이들은 통과 건수에 포함하지 않음. 실제 MySQL/ES/Redis 통합 검증의 과거 결과와 이번 단위 검증을 구분함.
 - 커밋 후보 코드·설정·문서에 대한 제한적 패턴 검사에서 JWT 형태·AWS access key 형태·GitHub token 형태·private key 블록을 발견하지 않음. 이 검사가 모든 종류의 비밀값 부재를 보증하지는 않음.
 
 ## 클라우드 전달 내용
@@ -36,4 +36,4 @@ UTC 변경은 ES 문서와 DB 검색 결과의 시각·정렬·커서 일치를 
 
 비동기 Outbox와 ES refresh를 사용하므로 메시지 전송 ACK 직후 검색 노출을 보장하지 않는다. 즉시 검색이 필수 요구라면 별도 일관성 설계가 필요하다. ES 장애를 빈 검색 결과로 바꾸지 않으며, `instr` 복귀 시 MySQL과 NFC ES의 검색 규칙이 완전히 같다는 보장도 없다.
 
-이번 준비 시점의 로컬 `origin/development` 참조에는 현재 브랜치보다 3개 커밋이 더 있으며, 원격을 새로 fetch한 결과는 아니다. 해당 추가 변경 파일은 SecurityConfig, GlobalExceptionHandler 및 SSE 오류 처리 테스트다. 실제 PR 준비 시 최신 원격을 확인하고 병합 후 검증한다. 현재 작업을 임의로 pull·reset·stash하지 않는다.
+푸시 준비 과정에서 원격을 fetch하고 `origin/development`의 `ca04ef5`를 기능 브랜치에 충돌 없이 병합했다. 최신 인증·보안·캐시·CI 변경을 포함한 상태에서 위 404건과 배포 JAR 생성을 검증했다. 서버 배포나 PR 생성은 이 검증에 포함되지 않는다.
