@@ -5,6 +5,7 @@ import jakarta.persistence.PersistenceContext;
 import jakarta.persistence.Query;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import org.springframework.stereotype.Repository;
 
@@ -16,7 +17,7 @@ public class ChatMessageSearchRepository {
     public List<Hit> search(Long roomId, String keyword, String fulltextCandidate,
                             LocalDateTime cursorTime, Long cursorId, int limit) {
         StringBuilder sql = new StringBuilder("""
-                SELECT m.id, m.sent_at
+                SELECT m.id, CAST(m.sent_at AS CHAR)
                 FROM chat_messages m
                 WHERE m.chat_room_id = :roomId AND m.status = 'SENT'
                   AND INSTR(m.content, :keyword) > 0
@@ -34,7 +35,7 @@ public class ChatMessageSearchRepository {
                 .setMaxResults(limit);
         if (fulltextCandidate != null) query.setParameter("fulltextCandidate", fulltextCandidate);
         if (cursorTime != null) {
-            query.setParameter("cursorTime", cursorTime);
+            query.setParameter("cursorTime", cursorTime.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME).replace('T', ' '));
             query.setParameter("cursorId", cursorId);
         }
         @SuppressWarnings("unchecked")
@@ -43,6 +44,7 @@ public class ChatMessageSearchRepository {
     }
 
     private LocalDateTime toLocalDateTime(Object value) {
+        if (value instanceof String text) return LocalDateTime.parse(text.replace(' ', 'T'));
         if (value instanceof Timestamp timestamp) return timestamp.toLocalDateTime();
         return (LocalDateTime) value;
     }

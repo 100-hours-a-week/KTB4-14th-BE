@@ -11,6 +11,7 @@ import com.audigo.domain.travel.entity.RouteSegment;
 import com.audigo.domain.travel.entity.RouteSegmentLeg;
 import com.audigo.domain.travel.entity.TravelPlan;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -92,5 +93,24 @@ class TagoBusStopLookupServiceTest {
 
         assertThat(service.findCandidates(route, leg)).isEmpty();
         verifyNoInteractions(client);
+    }
+
+    @Test
+    void 확인된_도시별_별칭은_대표_검색어로_TAGO에_전달한다() {
+        TagoBusStopNameCanonicalizer canonicalizer = new TagoBusStopNameCanonicalizer(
+                Map.of("31010", Map.of("수원 역", "수원역")));
+        service = new TagoBusStopLookupService(client, canonicalizer);
+        when(region.getName()).thenReturn("수원시");
+        when(region.getFullName()).thenReturn("경기도 수원시");
+        when(leg.getBoardingStopName()).thenReturn("  수원   역  ");
+        when(client.findCities()).thenReturn(List.of(new TagoBusStopClient.City("31010", "수원시")));
+        when(client.findStopsByName("31010", "수원역")).thenReturn(List.of(
+                new TagoBusStopClient.Stop("31010", "SWA000001", "수원역", "1234")));
+
+        assertThat(service.findCandidates(route, leg)).containsExactly(
+                new TagoBusStopLookupService.TagoStopIdentifier("31010", "SWA000001"));
+        verify(client).findStopsByName("31010", "수원역");
+        assertThat(canonicalizer.canonicalize("99999", "수원 역")).isEqualTo("수원 역");
+        assertThat(canonicalizer.canonicalize("31010", "수원")).isEqualTo("수원");
     }
 }

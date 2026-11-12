@@ -72,6 +72,9 @@ class ChatMessageServiceTest {
     private NotificationService notificationService;
 
     @Mock
+    private ChatMessageSearchOutboxStore searchOutboxStore;
+
+    @Mock
     private ChatRoom room;
 
     @Mock
@@ -113,7 +116,7 @@ class ChatMessageServiceTest {
         assertThat(response.messageSequence()).isEqualTo(7L);
         assertThat(response.content()).isEqualTo("hello");
 
-        InOrder order = inOrder(chatRoomRepository, chatRoomMemberRepository, chatMessageRepository);
+        InOrder order = inOrder(chatRoomRepository, chatRoomMemberRepository, chatMessageRepository, searchOutboxStore);
         order.verify(chatRoomRepository).findByIdForUpdate(ROOM_ID);
         order.verify(chatRoomMemberRepository).findByChatRoom_IdAndUser_IdAndDeletedAtIsNull(ROOM_ID, SENDER_ID);
         order.verify(chatMessageRepository).findByChatRoom_IdAndSender_IdAndClientMessageId(
@@ -122,6 +125,7 @@ class ChatMessageServiceTest {
                 CLIENT_MESSAGE_ID
         );
         order.verify(chatMessageRepository).saveAndFlush(any(ChatMessage.class));
+        order.verify(searchOutboxStore).enqueue(any(ChatMessage.class));
 
         List<TransactionSynchronization> synchronizations = TransactionSynchronizationManager.getSynchronizations();
         assertThat(synchronizations).hasSize(1);
@@ -213,6 +217,7 @@ class ChatMessageServiceTest {
 
         assertThat(response.messageSequence()).isEqualTo(4L);
         assertThat(response.content()).isEqualTo("hello");
+        verify(searchOutboxStore, never()).enqueue(any());
         verify(notificationService, never()).notifyNewMessage(any(), any(), any());
         verify(chatMessageRepository, never()).countSentBySenderSince(
                 eq(SENDER_ID),

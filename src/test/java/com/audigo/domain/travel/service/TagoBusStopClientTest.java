@@ -9,6 +9,7 @@ import com.audigo.domain.travel.config.TagoBusStopProperties;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
@@ -87,5 +88,53 @@ class TagoBusStopClientTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("TAGO 서비스 키");
         server.verify();
+    }
+
+    @Test
+    void 전체_건수에_맞춰_다음_페이지까지_조회한다() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = bindTo(builder).build();
+        String firstPage = IntStream.range(0, 100)
+                .mapToObj(index -> "{\"citycode\":\"" + index + "\",\"cityname\":\"도시" + index + "\"}")
+                .reduce((left, right) -> left + "," + right)
+                .orElseThrow();
+        server.expect(request -> assertThat(UriComponentsBuilder.fromUri(request.getURI())
+                        .build().getQueryParams().getFirst("pageNo")).isEqualTo("1"))
+                .andRespond(withSuccess(response(101, firstPage), MediaType.APPLICATION_JSON));
+        server.expect(request -> assertThat(UriComponentsBuilder.fromUri(request.getURI())
+                        .build().getQueryParams().getFirst("pageNo")).isEqualTo("2"))
+                .andRespond(withSuccess(response(101,
+                        "{\"citycode\":\"100\",\"cityname\":\"도시100\"}"), MediaType.APPLICATION_JSON));
+
+        TagoBusStopClient client = new TagoBusStopClient(
+                builder, new TagoBusStopProperties("http://tago.test/stops", "test-key"));
+
+        assertThat(client.findCities()).hasSize(101)
+                .last().isEqualTo(new TagoBusStopClient.City("100", "도시100"));
+        server.verify();
+    }
+
+    @Test
+    void 성공한_빈_결과와_확인할_수_없는_빈_응답을_구분한다() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = bindTo(builder).build();
+        server.expect(request -> { }).andRespond(withSuccess(
+                "{\"response\":{\"header\":{\"resultCode\":\"00\"},\"body\":{\"totalCount\":0}}}",
+                MediaType.APPLICATION_JSON));
+        server.expect(request -> { }).andRespond(withSuccess(
+                "{\"response\":{\"header\":{\"resultCode\":\"00\"},\"body\":{}}}",
+                MediaType.APPLICATION_JSON));
+        TagoBusStopClient client = new TagoBusStopClient(
+                builder, new TagoBusStopProperties("http://tago.test/stops", "test-key"));
+
+        assertThat(client.findStopsByName("25", "없는정류장")).isEmpty();
+        assertThatThrownBy(() -> client.findStopsByName("25", "없는정류장"))
+                .isInstanceOf(TagoBusStopClient.TagoBusStopException.class);
+        server.verify();
+    }
+
+    private static String response(int totalCount, String items) {
+        return "{\"response\":{\"header\":{\"resultCode\":\"00\"},\"body\":{\"totalCount\":"
+                + totalCount + ",\"items\":{\"item\":[" + items + "]}}}}";
     }
 }

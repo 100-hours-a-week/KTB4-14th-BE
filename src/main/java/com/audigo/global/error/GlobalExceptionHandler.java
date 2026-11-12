@@ -2,6 +2,7 @@ package com.audigo.global.error;
 
 import com.audigo.global.response.ApiResponse;
 import com.audigo.global.logging.RequestLoggingFilter;
+import com.audigo.domain.auth.service.AuthSessionUnavailableException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
@@ -22,6 +23,26 @@ import org.springframework.web.util.DisconnectedClientHelper;
 public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+    @ExceptionHandler(AuthSessionUnavailableException.class)
+    public ResponseEntity<ApiResponse<Void>> handleAuthSessionUnavailable(
+            AuthSessionUnavailableException exception,
+            HttpServletRequest request
+    ) {
+        Throwable cause = NestedExceptionUtils.getMostSpecificCause(exception);
+        log.error(
+                "auth_session_unavailable request_id={} method={} uri={} cause_type={} reason={}",
+                requestId(request),
+                request.getMethod(),
+                request.getRequestURI(),
+                cause.getClass().getName(),
+                cause.getMessage(),
+                exception
+        );
+        return ResponseEntity
+                .status(ErrorCode.AUTH_SERVICE_UNAVAILABLE.status())
+                .body(ApiResponse.of(ErrorCode.AUTH_SERVICE_UNAVAILABLE.message(), null));
+    }
 
     @ExceptionHandler(RateLimitExceededException.class)
     public ResponseEntity<ApiResponse<Void>> handleRateLimitExceeded(

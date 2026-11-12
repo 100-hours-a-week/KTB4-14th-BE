@@ -1,0 +1,13 @@
+# Enabled only by CHAT_DIAGNOSTICS=true in the local startup script.
+management:
+  server:
+    address: 127.0.0.1
+    port: 18081
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  metrics:
+    tags:
+      lab_api_port: ${server.port}
+      lab_search_mode: ${audigo.chat.message-search-mode:fulltext}

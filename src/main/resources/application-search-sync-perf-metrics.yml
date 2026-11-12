@@ -1,0 +1,12 @@
+management:
+  server:
+    address: 127.0.0.1
+    port: 18087
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  metrics:
+    tags:
+      lab_api_port: ${server.port}
+      lab_search_mode: ${audigo.chat.message-search-mode:fulltext}

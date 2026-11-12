@@ -14,7 +14,8 @@ import com.audigo.domain.user.repository.UserRepository;
 import com.audigo.global.error.BusinessException;
 import com.audigo.global.error.ErrorCode;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 public class AuthService {
@@ -26,30 +27,35 @@ public class AuthService {
     private final OAuthAccountRepository oauthAccountRepository;
     private final UserRepository userRepository;
     private final TokenService tokenService;
+    private final TransactionTemplate transactionTemplate;
 
     public AuthService(
             KakaoOAuthClient kakaoOAuthClient,
             OAuthAccountRepository oauthAccountRepository,
             UserRepository userRepository,
-            TokenService tokenService
+            TokenService tokenService,
+            PlatformTransactionManager transactionManager
     ) {
         this.kakaoOAuthClient = kakaoOAuthClient;
         this.oauthAccountRepository = oauthAccountRepository;
         this.userRepository = userRepository;
         this.tokenService = tokenService;
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
-    @Transactional
     public AuthLoginResult loginWithKakao(KakaoLoginRequest request) {
         if (!OAuthProvider.KAKAO.name().equalsIgnoreCase(request.provider())) {
             throw new BusinessException(ErrorCode.UNSUPPORTED_OAUTH_PROVIDER);
         }
 
         KakaoOAuthUserInfo oauthUser = kakaoOAuthClient.fetchUserInfo(request.authorizationCode());
-        UserLoginResult result = findOrCreateUser(oauthUser);
-        AuthTokens tokens = tokenService.issue(result.user().id());
+        AuthUserResponse response = transactionTemplate.execute(status -> {
+            UserLoginResult result = findOrCreateUser(oauthUser);
+            return AuthUserResponse.of(result.user(), result.isNewUser());
+        });
+        AuthTokens tokens = tokenService.issue(response.userId());
 
-        return new AuthLoginResult(tokens, AuthUserResponse.of(result.user(), result.isNewUser()));
+        return new AuthLoginResult(tokens, response);
     }
 
     public AuthTokens refresh(String refreshToken) {

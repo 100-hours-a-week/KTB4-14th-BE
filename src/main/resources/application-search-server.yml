@@ -1,0 +1,20 @@
+# Add search-server to the existing deployment profile, for example prod,search-server.
+# Loading this profile alone does not switch search or enable Outbox writes.
+audigo:
+  chat:
+    message-search-mode: ${AUDIGO_CHAT_MESSAGE_SEARCH_MODE:fulltext}
+    es:
+      url: ${AUDIGO_CHAT_ES_URL:}
+      username: ${AUDIGO_CHAT_ES_USERNAME:}
+      password: ${AUDIGO_CHAT_ES_PASSWORD:}
+      index: ${AUDIGO_CHAT_ES_INDEX:}
+      text-contract: ${AUDIGO_CHAT_ES_TEXT_CONTRACT:nfc-v1}
+    search-sync:
+      database-name: ${AUDIGO_CHAT_SEARCH_SYNC_DATABASE_NAME:}
+      target-index: ${AUDIGO_CHAT_SEARCH_SYNC_TARGET_INDEX:${AUDIGO_CHAT_ES_INDEX:}}
+      target-generation: ${AUDIGO_CHAT_SEARCH_SYNC_TARGET_GENERATION:}
+      record-enabled: ${AUDIGO_CHAT_SEARCH_SYNC_RECORD_ENABLED:false}
+      worker-enabled: ${AUDIGO_CHAT_SEARCH_SYNC_WORKER_ENABLED:false}
+      es-url: ${AUDIGO_CHAT_SEARCH_SYNC_ES_URL:${AUDIGO_CHAT_ES_URL:}}
+      es-username: ${AUDIGO_CHAT_SEARCH_SYNC_ES_USERNAME:}
+      es-password: ${AUDIGO_CHAT_SEARCH_SYNC_ES_PASSWORD:}
