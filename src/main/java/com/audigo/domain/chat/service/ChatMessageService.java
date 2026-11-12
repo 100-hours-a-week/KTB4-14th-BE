@@ -23,6 +23,7 @@ import com.audigo.global.error.RateLimitExceededException;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -48,6 +49,7 @@ public class ChatMessageService {
     private final UserRepository userRepository;
     private final ChatRealtimePublisher realtimePublisher;
     private final NotificationService notificationService;
+    private final ChatMessageSearchOutboxStore searchOutboxStore;
 
     public ChatMessageService(
             ChatRoomRepository chatRoomRepository,
@@ -55,7 +57,8 @@ public class ChatMessageService {
             ChatMessageRepository chatMessageRepository,
             UserRepository userRepository,
             ChatRealtimePublisher realtimePublisher,
-            NotificationService notificationService
+            NotificationService notificationService,
+            ChatMessageSearchOutboxStore searchOutboxStore
     ) {
         this.chatRoomRepository = chatRoomRepository;
         this.chatRoomMemberRepository = chatRoomMemberRepository;
@@ -63,6 +66,7 @@ public class ChatMessageService {
         this.userRepository = userRepository;
         this.realtimePublisher = realtimePublisher;
         this.notificationService = notificationService;
+        this.searchOutboxStore = searchOutboxStore;
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -109,7 +113,7 @@ public class ChatMessageService {
             throw new BusinessException(ErrorCode.USER_INACTIVE);
         }
 
-        LocalDateTime sentAt = LocalDateTime.now(ZoneOffset.UTC);
+        LocalDateTime sentAt = LocalDateTime.now(ZoneOffset.UTC).truncatedTo(ChronoUnit.MICROS);
         enforceRateLimit(userId, sentAt);
         boolean shouldNotifyRecipient = chatMessageRepository.existsUnreadMessages(roomId, recipientUserId) == 0;
 
@@ -122,6 +126,7 @@ public class ChatMessageService {
                 messageSequence,
                 sentAt
         ));
+        searchOutboxStore.enqueue(message);
         ChatMessageResponse response = toResponse(message);
         publishAfterCommit(recipientUserId, sender.nickname(), response, shouldNotifyRecipient);
         return new SendResult(response, true);

@@ -6,6 +6,7 @@ import jakarta.persistence.PersistenceContext;
 import jakarta.persistence.Query;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import org.springframework.stereotype.Repository;
 
@@ -27,7 +28,7 @@ public class ChatRoomListRepository {
                        other_member.user_id,
                        other_user.nickname,
                        cr.status,
-                       cr.last_message_at,
+                       CAST(cr.last_message_at AS CHAR),
                        other_user.profile_image_url
                 FROM chat_rooms cr
                 JOIN chat_room_members other_member
@@ -66,7 +67,7 @@ public class ChatRoomListRepository {
             query.setParameter("chatName", "%" + escapeLikePattern(chatName) + "%");
         }
         if (cursorTime != null) {
-            query.setParameter("cursorTime", cursorTime);
+            query.setParameter("cursorTime", cursorTime.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME).replace('T', ' '));
             query.setParameter("cursorId", cursorId);
         }
         query.setMaxResults(limit);
@@ -95,6 +96,7 @@ public class ChatRoomListRepository {
     }
 
     private LocalDateTime toLocalDateTime(Object value) {
+        if (value instanceof String text) return LocalDateTime.parse(text.replace(' ', 'T'));
         if (value instanceof Timestamp timestamp) {
             return timestamp.toLocalDateTime();
         }

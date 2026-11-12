@@ -9,9 +9,11 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.audigo.domain.chat.dto.ChatMessageContextResponse;
+import com.audigo.domain.chat.config.ChatMessageSearchMode;
 import com.audigo.domain.chat.dto.ChatMessageSearchResponse;
 import com.audigo.domain.chat.entity.ChatRoomStatus;
 import com.audigo.domain.chat.repository.ChatMessageSearchRepository;
+import com.audigo.domain.chat.repository.ChatMessageEsSearch;
 import com.audigo.domain.chat.repository.ChatRoomDetailRepository;
 import com.audigo.domain.chat.repository.ChatRoomDetailRepository.MessageDetailRow;
 import com.audigo.domain.chat.repository.ChatRoomDetailRepository.RoomDetailRow;
@@ -27,6 +29,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.mock.env.MockEnvironment;
 
 @ExtendWith(MockitoExtension.class)
 class ChatMessageSearchServiceTest {
@@ -38,7 +41,76 @@ class ChatMessageSearchServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new ChatMessageSearchService(detailRepository, searchRepository);
+        service = new ChatMessageSearchService(detailRepository, new ChatMessageSearchMode(new MockEnvironment()),
+                new ChatMessageSearchDatabase(detailRepository, searchRepository), Optional.empty());
+    }
+
+    @Test
+    void literal_control_preserves_cursor_and_does_not_retry_an_empty_result() {
+        MockEnvironment environment = new MockEnvironment()
+                .withProperty("audigo.chat.message-search-mode", "instr");
+        environment.setActiveProfiles("search-lab");
+        service = new ChatMessageSearchService(detailRepository, new ChatMessageSearchMode(environment),
+                new ChatMessageSearchDatabase(detailRepository, searchRepository), Optional.empty());
+        when(detailRepository.findAccessibleRoom(54L, 1L)).thenReturn(Optional.of(ROOM));
+        when(searchRepository.search(54L, "월정리", null, TIME, 102L, 51)).thenReturn(List.of());
+
+        var result = service.search(1L, "54", "월정리", TIME.atOffset(ZoneOffset.UTC).toString(), "102");
+
+        assertThat(result.matches()).isEmpty();
+        assertThat(result.hasNext()).isFalse();
+        verify(searchRepository).search(54L, "월정리", null, TIME, 102L, 51);
+        org.mockito.Mockito.verifyNoMoreInteractions(searchRepository);
+    }
+
+    private ChatMessageEsSearch useEs() {
+        var environment = new MockEnvironment().withProperty("audigo.chat.message-search-mode", "es")
+                .withProperty("audigo.chat.es.index", "chat-messages-poc-v1-20261105-114517-601");
+        environment.setActiveProfiles("search-lab");
+        var adapter = org.mockito.Mockito.mock(ChatMessageEsSearch.class);
+        service = new ChatMessageSearchService(detailRepository, new ChatMessageSearchMode(environment),
+                new ChatMessageSearchDatabase(detailRepository, searchRepository), Optional.of(adapter));
+        return adapter;
+    }
+
+    @Test
+    void nfc_composes_before_search_and_rejects_a_single_composed_character() {
+        var env = new MockEnvironment().withProperty("audigo.chat.message-search-mode", "es")
+                .withProperty("audigo.chat.es.text-contract", "nfc-v1")
+                .withProperty("audigo.chat.es.index", "chat-messages-nfc-v1-20261108-120000-001");
+        env.setActiveProfiles("search-lab");
+        var adapter = org.mockito.Mockito.mock(ChatMessageEsSearch.class);
+        service = new ChatMessageSearchService(detailRepository, new ChatMessageSearchMode(env),
+                new ChatMessageSearchDatabase(detailRepository, searchRepository), Optional.of(adapter));
+        assertThatThrownBy(() -> service.search(1L, "54", "가", null, null)).isInstanceOf(BusinessException.class);
+        org.mockito.Mockito.verifyNoInteractions(adapter, detailRepository);
+        when(detailRepository.findAccessibleRoom(54L, 1L)).thenReturn(Optional.of(ROOM));
+        when(adapter.search(any(), org.mockito.ArgumentMatchers.eq("Café"), org.mockito.ArgumentMatchers.eq(51))).thenReturn(List.of());
+        service.search(1L, "54", " Cafe\u0301 ", null, null);
+        verify(adapter).search(any(), org.mockito.ArgumentMatchers.eq("Café"), org.mockito.ArgumentMatchers.eq(51));
+        org.mockito.Mockito.verifyNoInteractions(searchRepository);
+    }
+
+    @Test
+    void es_checks_membership_before_calling_the_engine() {
+        var adapter = useEs();
+        when(detailRepository.findAccessibleRoom(54L, 1L)).thenReturn(Optional.empty());
+        assertThatThrownBy(() -> service.search(1L, "54", "검색", null, null))
+                .isInstanceOfSatisfying(BusinessException.class, error -> assertThat(error.errorCode()).isEqualTo(ErrorCode.CHAT_ROOM_NOT_FOUND));
+        org.mockito.Mockito.verifyNoInteractions(adapter, searchRepository);
+    }
+
+    @Test
+    void es_empty_result_and_failure_never_fall_back_to_mysql_search() {
+        var adapter = useEs();
+        when(detailRepository.findAccessibleRoom(54L, 1L)).thenReturn(Optional.of(ROOM));
+        when(adapter.search(any(), org.mockito.ArgumentMatchers.eq("검색"), org.mockito.ArgumentMatchers.eq(51))).thenReturn(List.of());
+        assertThat(service.search(1L, "54", " 검색 ", null, null).matches()).isEmpty();
+        when(adapter.search(any(), org.mockito.ArgumentMatchers.eq("검색"), org.mockito.ArgumentMatchers.eq(51)))
+                .thenThrow(new BusinessException(ErrorCode.SERVICE_UNAVAILABLE));
+        assertThatThrownBy(() -> service.search(1L, "54", "검색", null, null))
+                .isInstanceOfSatisfying(BusinessException.class, error -> assertThat(error.errorCode()).isEqualTo(ErrorCode.SERVICE_UNAVAILABLE));
+        org.mockito.Mockito.verifyNoInteractions(searchRepository);
     }
 
     @Test
