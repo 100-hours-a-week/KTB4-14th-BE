@@ -1,0 +1,138 @@
+name: Publish backend image
+
+# main 반영으로만 배포 후보를 발행합니다. 기능 브랜치 Push와 PR은 발행 대상이 아닙니다.
+on:
+  push:
+    branches: [main]
+
+# 실행 중인 이미지 발행을 취소하지 않습니다. 후보의 최신 여부는 Cloud에서 다시 판단합니다.
+concurrency:
+  group: backend-publish-image-main
+  cancel-in-progress: false
+
+# GITHUB_TOKEN은 읽기 전용입니다. Docker Hub 인증은 별도의 전용 토큰을 사용합니다.
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      # 검증한 커밋의 소스를 사용하고 checkout 이후 Git 인증 정보를 남기지 않습니다.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Java 21
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # PR 통과 여부와 별개로 main의 실제 발행 SHA에서도 테스트를 통과해야 합니다.
+      - name: Run tests
+        run: ./gradlew test --no-daemon
+
+      # 실패한 발행의 보고서를 run·attempt별로 구분해 보관합니다. 이후 이미지 발행은 건너뜁니다.
+      - name: Upload test reports on failure
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-reports-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            build/reports/tests/test/
+            build/test-results/test/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # 통합 이미지 하나를 발행합니다. 기능별로 어떤 Deployment를 갱신할지는 Cloud가 결정합니다.
+      # SHA 태그는 추적용이며, 실제 스테이징·운영 승격은 빌드 결과 digest로 고정합니다.
+      - name: Build and push ARM64 image
+        id: image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/arm64
+          push: true
+          tags: ${{ vars.DOCKERHUB_IMAGE }}:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      # 소스 SHA·digest·run·attempt를 묶어 후보 JSON을 만듭니다.
+      # 동일 run 재실행도 구별할 수 있도록 artifact 이름에 attempt를 포함합니다.
+      - name: Create candidate record
+        id: candidate
+        env:
+          SOURCE_REPOSITORY: ${{ github.repository }}
+          SOURCE_SHA: ${{ github.sha }}
+          SOURCE_REF: ${{ github.ref }}
+          IMAGE_REPOSITORY: ${{ vars.DOCKERHUB_IMAGE }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo 'Image digest is missing or invalid.' >&2
+            exit 1
+          fi
+          if [[ ! "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ || -z "$IMAGE_REPOSITORY" ]]; then
+            echo 'Source SHA or image repository is invalid.' >&2
+            exit 1
+          fi
+          artifact_name="image-candidate-${SOURCE_SHA}-${RUN_ID}-${RUN_ATTEMPT}"
+          jq -n \
+            --arg source_repository "$SOURCE_REPOSITORY" \
+            --arg source_sha "$SOURCE_SHA" \
+            --arg source_ref "$SOURCE_REF" \
+            --arg image_repository "$IMAGE_REPOSITORY" \
+            --arg image_tag "sha-${SOURCE_SHA}" \
+            --arg image_digest "$IMAGE_DIGEST" \
+            --arg run_id "$RUN_ID" \
+            --arg run_attempt "$RUN_ATTEMPT" \
+            --arg run_url "$RUN_URL" \
+            '{schema_version: 1, source_repository: $source_repository, source_sha: $source_sha,
+              source_ref: $source_ref, image_repository: $image_repository, image_tag: $image_tag,
+              image_digest: $image_digest, platform: "linux/arm64", workflow_run_id: $run_id,
+              workflow_run_attempt: $run_attempt, workflow_run_url: $run_url}' > image-candidate.json
+          echo "artifact_name=$artifact_name" >> "$GITHUB_OUTPUT"
+
+      # Cloud가 지정한 run/attempt의 artifact를 내려받아 API·registry 정보와 대조합니다.
+      # artifact가 만료되면 후보 검증이 차단되므로 보관 기간 안에 승격해야 합니다.
+      - name: Upload candidate record
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ steps.candidate.outputs.artifact_name }}
+          path: image-candidate.json
+          if-no-files-found: error
+          retention-days: 90
+
+      # 이미지 발행 결과만 기록합니다. Cloud 알림과 실제 스테이징 Sync는 후속 단계입니다.
+      - name: Summarize published image
+        env:
+          IMAGE_REPOSITORY: ${{ vars.DOCKERHUB_IMAGE }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+          SOURCE_SHA: ${{ github.sha }}
+          ARTIFACT_NAME: ${{ steps.candidate.outputs.artifact_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
+        run: |
+          {
+            echo '### Published image candidate'
+            echo "- Image: \`${IMAGE_REPOSITORY}:sha-${SOURCE_SHA}\`"
+            echo "- Source SHA: \`${SOURCE_SHA}\`"
+            echo "- Digest: \`${IMAGE_DIGEST}\`"
+            echo "- Candidate artifact: \`${ARTIFACT_NAME}\`"
+            echo "- [Build run](${RUN_URL})"
+          } >> "$GITHUB_STEP_SUMMARY"

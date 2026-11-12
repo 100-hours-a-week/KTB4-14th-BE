@@ -37,7 +37,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/actuator/health", "/health", "/users/login", "/users/refresh").permitAll()
                         .requestMatchers("/actuator/prometheus")
-                        .access(new WebExpressionAuthorizationManager("hasIpAddress('10.0.10.230')"))
+                        .access(new WebExpressionAuthorizationManager("hasIpAddress('10.1.0.0/16')"))
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(bearerTokenAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)

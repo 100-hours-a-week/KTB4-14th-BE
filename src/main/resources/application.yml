@@ -99,6 +99,12 @@ audigo:
     tago:
       base-url: ${TAGO_BUS_STOP_BASE_URL:https://apis.data.go.kr/1613000/BusSttnInfoInqireService}
       service-key: ${TAGO_SERVICE_KEY:}
+    cache:
+      enabled: ${AUDIGO_TRANSIT_STOP_CACHE_ENABLED:true}
+      city-ttl: ${AUDIGO_TRANSIT_STOP_CITY_CACHE_TTL:24h}
+      stop-ttl: ${AUDIGO_TRANSIT_STOP_CACHE_TTL:6h}
+      empty-stop-ttl: ${AUDIGO_TRANSIT_STOP_EMPTY_CACHE_TTL:5m}
+      ttl-jitter-ratio: ${AUDIGO_TRANSIT_STOP_CACHE_TTL_JITTER_RATIO:0.1}
 
   ai:
     base-url: ${AUDIGO_AI_BASE_URL:}

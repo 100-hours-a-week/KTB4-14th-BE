@@ -2,9 +2,12 @@ package com.audigo.global.error;
 
 import com.audigo.global.response.ApiResponse;
 import com.audigo.global.logging.RequestLoggingFilter;
+import com.audigo.domain.auth.service.AuthSessionUnavailableException;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.NestedExceptionUtils;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -13,11 +16,33 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
+import org.springframework.web.util.DisconnectedClientHelper;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+    @ExceptionHandler(AuthSessionUnavailableException.class)
+    public ResponseEntity<ApiResponse<Void>> handleAuthSessionUnavailable(
+            AuthSessionUnavailableException exception,
+            HttpServletRequest request
+    ) {
+        Throwable cause = NestedExceptionUtils.getMostSpecificCause(exception);
+        log.error(
+                "auth_session_unavailable request_id={} method={} uri={} cause_type={} reason={}",
+                requestId(request),
+                request.getMethod(),
+                request.getRequestURI(),
+                cause.getClass().getName(),
+                cause.getMessage(),
+                exception
+        );
+        return ResponseEntity
+                .status(ErrorCode.AUTH_SERVICE_UNAVAILABLE.status())
+                .body(ApiResponse.of(ErrorCode.AUTH_SERVICE_UNAVAILABLE.message(), null));
+    }
 
     @ExceptionHandler(RateLimitExceededException.class)
     public ResponseEntity<ApiResponse<Void>> handleRateLimitExceeded(
@@ -97,6 +122,31 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(errorCode.status())
                 .body(ApiResponse.of(errorCode.message(), null));
+    }
+
+    @ExceptionHandler(AsyncRequestNotUsableException.class)
+    public void handleAsyncResponseNotUsable(
+            AsyncRequestNotUsableException exception,
+            HttpServletRequest request,
+            HttpServletResponse response
+    ) {
+        // A ServletResponse argument marks this void result as handled, without writing to the broken stream.
+        Throwable cause = NestedExceptionUtils.getMostSpecificCause(exception);
+        // Do not pass the wrapper itself: Spring's helper treats every wrapper of this type as a disconnect.
+        boolean disconnected = DisconnectedClientHelper.isClientDisconnectedException(exception.getCause())
+                || "Servlet container error notification for disconnected client".equals(exception.getMessage());
+        if (disconnected) {
+            log.info("async_client_disconnected request_id={} method={} uri={} exception_type={} cause_type={} reason={}",
+                    requestId(request), request.getMethod(), request.getRequestURI(),
+                    exception.getClass().getName(), cause.getClass().getName(), cause.getMessage());
+            log.debug("async_client_disconnected_details request_id={}", requestId(request), exception);
+            return;
+        }
+
+        // An unusable response is not always a client disconnect. Keep unknown failures visible, but do not write.
+        log.error("async_response_unusable request_id={} method={} uri={} exception_type={} cause_type={} reason={}",
+                requestId(request), request.getMethod(), request.getRequestURI(),
+                exception.getClass().getName(), cause.getClass().getName(), cause.getMessage(), exception);
     }
 
     @ExceptionHandler(Exception.class)
