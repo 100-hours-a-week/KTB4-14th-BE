@@ -1,0 +1,22 @@
+{
+  "settings": {
+    "number_of_shards": 1,
+    "number_of_replicas": 0,
+    "analysis": {
+      "tokenizer": {"literal_bigrams": {"type": "ngram", "min_gram": 2, "max_gram": 2, "token_chars": []}},
+      "analyzer": {"literal_contains": {"type": "custom", "tokenizer": "literal_bigrams", "filter": ["lowercase"]}}
+    }
+  },
+  "mappings": {
+    "dynamic": "strict",
+    "_meta": {"schema_version": 1, "text_contract": "nfc-v1", "sync_generation": "__TARGET_GENERATION__"},
+    "properties": {
+      "message_id": {"type": "long"},
+      "room_id": {"type": "long"},
+      "status": {"type": "keyword"},
+      "sent_at": {"type": "date_nanos", "format": "strict_date_optional_time_nanos"},
+      "content": {"type": "text", "index": false},
+      "content_nfc": {"type": "text", "analyzer": "literal_contains", "search_analyzer": "literal_contains"}
+    }
+  }
+}

@@ -1,6 +1,7 @@
 package com.audigo.domain.chat.entity;
 
 import com.audigo.domain.user.entity.User;
+import com.audigo.domain.chat.persistence.UtcLocalDateTimeJdbcType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -15,7 +16,9 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.Objects;
+import org.hibernate.annotations.JdbcType;
 
 @Entity
 @Table(
@@ -59,6 +62,7 @@ public class ChatMessage {
     private ChatMessageStatus status;
 
     @Column(name = "sent_at", nullable = false)
+    @JdbcType(UtcLocalDateTimeJdbcType.class)
     private LocalDateTime sentAt;
 
     protected ChatMessage() {
@@ -78,7 +82,7 @@ public class ChatMessage {
         this.content = Objects.requireNonNull(content, "메시지 내용은 필수입니다.");
         this.messageSequence = messageSequence;
         this.status = ChatMessageStatus.SENT;
-        this.sentAt = Objects.requireNonNull(sentAt, "전송 시각은 필수입니다.");
+        this.sentAt = Objects.requireNonNull(sentAt, "전송 시각은 필수입니다.").truncatedTo(ChronoUnit.MICROS);
     }
 
     public static ChatMessage create(

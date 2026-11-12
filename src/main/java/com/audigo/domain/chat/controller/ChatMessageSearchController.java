@@ -1,5 +1,7 @@
 package com.audigo.domain.chat.controller;
 
+import com.audigo.domain.chat.config.ChatMessageSearchMode;
+import jakarta.servlet.http.HttpServletResponse;
 import com.audigo.domain.chat.dto.ChatMessageContextResponse;
 import com.audigo.domain.chat.dto.ChatMessageSearchResponse;
 import com.audigo.domain.chat.service.ChatMessageSearchService;
@@ -14,10 +16,13 @@ import org.springframework.web.bind.annotation.RestController;
 public class ChatMessageSearchController {
     private final CurrentUser currentUser;
     private final ChatMessageSearchService service;
+    private final ChatMessageSearchMode searchMode;
 
-    public ChatMessageSearchController(CurrentUser currentUser, ChatMessageSearchService service) {
+    public ChatMessageSearchController(CurrentUser currentUser, ChatMessageSearchService service,
+                                       ChatMessageSearchMode searchMode) {
         this.currentUser = currentUser;
         this.service = service;
+        this.searchMode = searchMode;
     }
 
     @GetMapping("/api/v2/chat/rooms/{roomId}/messages/search")
@@ -25,8 +30,16 @@ public class ChatMessageSearchController {
             @PathVariable String roomId,
             @RequestParam String keyword,
             @RequestParam(required = false) String cursor_time,
-            @RequestParam(required = false) String cursor_id
+            @RequestParam(required = false) String cursor_id,
+            HttpServletResponse response
     ) {
+        if (searchMode.isLab()) {
+            response.setHeader("X-Audigo-Message-Search-Mode", searchMode.value());
+            if (searchMode.usesEs()) {
+                response.setHeader("X-Audigo-Message-Search-Index", searchMode.esIndex());
+                response.setHeader("X-Audigo-Message-Search-Text-Contract", searchMode.esTextContract());
+            }
+        }
         return ApiResponse.of("chat_message_search_success",
                 service.search(currentUser.id(), roomId, keyword, cursor_time, cursor_id));
     }

@@ -1,5 +1,8 @@
 package com.audigo.domain.chat.entity;
 
+import com.audigo.domain.chat.persistence.UtcLocalDateTimeJdbcType;
+import org.hibernate.annotations.JdbcType;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -12,6 +15,7 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.Objects;
 
 @Entity
@@ -44,6 +48,7 @@ public class ChatRoom {
     private LocalDateTime createdAt;
 
     @Column(name = "last_message_at")
+    @JdbcType(UtcLocalDateTimeJdbcType.class)
     private LocalDateTime lastMessageAt;
 
     @Column(name = "last_message_sequence", nullable = false, columnDefinition = "BIGINT NOT NULL DEFAULT 0")
@@ -89,7 +94,7 @@ public class ChatRoom {
 
     public long recordMessage(LocalDateTime sentAt) {
         lastMessageSequence += 1;
-        lastMessageAt = sentAt;
+        lastMessageAt = Objects.requireNonNull(sentAt, "sentAt").truncatedTo(ChronoUnit.MICROS);
         return lastMessageSequence;
     }
 

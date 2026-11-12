@@ -47,6 +47,22 @@ tasks.named('test') {
     useJUnitPlatform()
 }
 
+['Utc': 'UTC', 'Seoul': 'Asia/Seoul'].each { suffix, zone ->
+    tasks.register("chatSearchTime${suffix}Test", Test) {
+        description = "Verifies chat UTC storage and microseconds with JVM timezone ${zone}"
+        group = 'verification'
+        testClassesDirs = sourceSets.test.output.classesDirs
+        classpath = sourceSets.test.runtimeClasspath
+        useJUnitPlatform()
+        filter { includeTestsMatching '*ChatMessageSearchTimeIntegrationTest' }
+        systemProperty 'user.timezone', zone
+        systemProperty 'chat.time.expected-jvm-zone', zone
+        maxParallelForks = 1
+        shouldRunAfter tasks.named('test')
+    }
+}
+tasks.named('chatSearchTimeSeoulTest') { shouldRunAfter tasks.named('chatSearchTimeUtcTest') }
+
 sentry {
     includeSourceContext = true
 

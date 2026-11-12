@@ -1,20 +1,22 @@
 package com.audigo.domain.chat.service;
 
+import com.audigo.domain.chat.config.ChatMessageSearchMode;
 import com.audigo.domain.chat.dto.ChatMessageContextResponse;
 import com.audigo.domain.chat.dto.ChatMessageSearchResponse;
 import com.audigo.domain.chat.dto.ChatRoomDetailQuery;
 import com.audigo.domain.chat.dto.ChatRoomDetailResponse;
 import com.audigo.domain.chat.repository.ChatMessageSearchRepository;
+import com.audigo.domain.chat.repository.ChatMessageEsSearch;
 import com.audigo.domain.chat.repository.ChatRoomDetailRepository;
 import com.audigo.domain.chat.repository.ChatRoomDetailRepository.MessageDetailRow;
 import com.audigo.global.error.BusinessException;
 import com.audigo.global.error.ErrorCode;
 import java.time.ZoneOffset;
+import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.Optional;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,17 +24,21 @@ import org.springframework.transaction.annotation.Transactional;
 public class ChatMessageSearchService {
     private static final int SEARCH_PAGE_SIZE = 50;
     private static final int CONTEXT_SIDE_SIZE = 10;
-    private static final Pattern SEARCHABLE_RUN = Pattern.compile("[\\p{L}\\p{N}]{2,}");
     private final ChatRoomDetailRepository detailRepository;
-    private final ChatMessageSearchRepository searchRepository;
+    private final ChatMessageSearchMode searchMode;
+    private final ChatMessageSearchDatabase database;
+    private final Optional<ChatMessageEsSearch> esSearch;
 
     public ChatMessageSearchService(ChatRoomDetailRepository detailRepository,
-                                    ChatMessageSearchRepository searchRepository) {
+                                    ChatMessageSearchMode searchMode,
+                                    ChatMessageSearchDatabase database,
+                                    Optional<ChatMessageEsSearch> esSearch) {
         this.detailRepository = detailRepository;
-        this.searchRepository = searchRepository;
+        this.searchMode = searchMode;
+        this.database = database;
+        this.esSearch = esSearch;
     }
 
-    @Transactional(readOnly = true)
     public ChatMessageSearchResponse search(Long userId, String rawRoomId, String rawKeyword,
                                             String rawCursorTime, String rawCursorId) {
         ChatRoomDetailQuery query = ChatRoomDetailQuery.from(rawRoomId, null, rawCursorTime, rawCursorId);
@@ -40,19 +46,21 @@ public class ChatMessageSearchService {
         if (keyword.codePointCount(0, keyword.length()) < 2 || keyword.codePointCount(0, keyword.length()) > 100) {
             throw new BusinessException(ErrorCode.INVALID_REQUEST);
         }
-        requireRoom(query.roomId(), userId);
-        Matcher matcher = SEARCHABLE_RUN.matcher(keyword);
-        String candidate = null;
-        while (matcher.find()) {
-            if (candidate == null || matcher.group().length() > candidate.length()) candidate = matcher.group();
+        // Retain the raw input cap; composition must not turn a two-codepoint
+        // spelling of a single character into a valid bigram search.
+        if (searchMode.usesNfc()) {
+            keyword = Normalizer.normalize(keyword, Normalizer.Form.NFC);
+            if (keyword.codePointCount(0, keyword.length()) < 2) {
+                throw new BusinessException(ErrorCode.INVALID_REQUEST);
+            }
         }
-        List<ChatMessageSearchRepository.Hit> fetched = searchRepository.search(
-                query.roomId(), keyword, candidate, query.cursorTime(), query.cursorId(), SEARCH_PAGE_SIZE + 1);
-        // MySQL ngram stopwords can discard a short candidate (for example "in").
-        // Preserve literal-search correctness when the index finds no candidates.
-        if (candidate != null && fetched.isEmpty()) {
-            fetched = searchRepository.search(
-                    query.roomId(), keyword, null, query.cursorTime(), query.cursorId(), SEARCH_PAGE_SIZE + 1);
+        List<ChatMessageSearchRepository.Hit> fetched;
+        if (searchMode.usesEs()) {
+            database.requireRoom(query.roomId(), userId);
+            fetched = esSearch.orElseThrow(() -> new IllegalStateException("ES adapter unavailable"))
+                    .search(query, keyword, SEARCH_PAGE_SIZE + 1);
+        } else {
+            fetched = database.search(userId, query, keyword, searchMode.usesFulltext(), SEARCH_PAGE_SIZE + 1);
         }
         boolean hasNext = fetched.size() > SEARCH_PAGE_SIZE;
         List<ChatMessageSearchRepository.Hit> page = hasNext ? fetched.subList(0, SEARCH_PAGE_SIZE) : fetched;

@@ -6,6 +6,7 @@ import jakarta.persistence.PersistenceContext;
 import jakarta.persistence.Query;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.stereotype.Repository;
@@ -67,7 +68,7 @@ public class ChatRoomDetailRepository {
                 SELECT chat_message.id,
                        chat_message.sender_id,
                        chat_message.content,
-                       chat_message.sent_at,
+                       CAST(chat_message.sent_at AS CHAR),
                        CASE WHEN EXISTS (
                            SELECT 1
                            FROM chat_message_reads message_read
@@ -106,7 +107,7 @@ public class ChatRoomDetailRepository {
                 .setParameter("opponentUserId", opponentUserId)
                 .setMaxResults(limit);
         if (cursorTime != null) {
-            query.setParameter("cursorTime", cursorTime);
+            query.setParameter("cursorTime", cursorTime.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME).replace('T', ' '));
             query.setParameter("cursorId", cursorId);
         }
 
@@ -117,7 +118,7 @@ public class ChatRoomDetailRepository {
 
     public Optional<MessageDetailRow> findMessage(Long roomId, Long userId, Long opponentUserId, Long chatId) {
         List<Object[]> rows = entityManager.createNativeQuery("""
-                SELECT m.id, m.sender_id, m.content, m.sent_at,
+                SELECT m.id, m.sender_id, m.content, CAST(m.sent_at AS CHAR),
                        CASE WHEN EXISTS (
                            SELECT 1 FROM chat_message_reads r
                            WHERE r.message_id = m.id
@@ -140,7 +141,7 @@ public class ChatRoomDetailRepository {
     ) {
         @SuppressWarnings("unchecked")
         List<Object[]> rows = entityManager.createNativeQuery("""
-                SELECT m.id, m.sender_id, m.content, m.sent_at,
+                SELECT m.id, m.sender_id, m.content, CAST(m.sent_at AS CHAR),
                        CASE WHEN EXISTS (
                            SELECT 1 FROM chat_message_reads r
                            WHERE r.message_id = m.id
@@ -154,7 +155,7 @@ public class ChatRoomDetailRepository {
                 .setParameter("roomId", roomId)
                 .setParameter("userId", userId)
                 .setParameter("opponentUserId", opponentUserId)
-                .setParameter("anchorTime", anchorTime)
+                .setParameter("anchorTime", anchorTime.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME).replace('T', ' '))
                 .setParameter("anchorId", anchorId)
                 .setMaxResults(limit)
                 .getResultList();
@@ -173,6 +174,7 @@ public class ChatRoomDetailRepository {
     }
 
     private LocalDateTime toLocalDateTime(Object value) {
+        if (value instanceof String text) return LocalDateTime.parse(text.replace(' ', 'T'));
         if (value instanceof Timestamp timestamp) {
             return timestamp.toLocalDateTime();
         }

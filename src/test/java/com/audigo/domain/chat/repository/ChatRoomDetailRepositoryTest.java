@@ -69,7 +69,7 @@ class ChatRoomDetailRepositoryTest {
                 .contains("chat_message.id < :cursorId")
                 .contains("ORDER BY chat_message.sent_at DESC, chat_message.id DESC");
         verify(query).setParameter("opponentUserId", 2L);
-        verify(query).setParameter("cursorTime", sentAt);
+        verify(query).setParameter("cursorTime", "2026-09-04 08:00:20");
         verify(query).setParameter("cursorId", 100L);
         assertThat(rows).containsExactly(new ChatRoomDetailRepository.MessageDetailRow(
                 101L,
